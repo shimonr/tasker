@@ -97,8 +97,23 @@ export const completeTask = async (taskId: number) => {
   return response.data
 }
 
+export const updateTaskStatus = async (taskId: number, status: string) => {
+  const response = await api.post(`/tasks/${taskId}/status`, { status })
+  return response.data
+}
+
+export const fetchTaskLogs = async (taskId: number) => {
+  const response = await api.get(`/parent/tasks/${taskId}/log`)
+  return response.data
+}
+
+export const deleteTask = async (taskId: number) => {
+  const response = await api.delete(`/parent/tasks/${taskId}`)
+  return response.data
+}
+
 export const createTask = async (
-  task: Partial<Task> & { assignee_ids: number[]; recurrence?: string }
+  task: Partial<Task> & { assignee_ids: number[]; recurrence?: string; start_date?: string }
 ) => {
   const response = await api.post<Task>('/parent/tasks', task)
   return response.data

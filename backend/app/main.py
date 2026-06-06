@@ -119,6 +119,36 @@ def list_parent_tasks(status: str | None = None, child_id: int | None = None, cu
 def parent_task_stats(current_user: models.User = Depends(deps.require_role(models.UserRole.parent)), db: Session = Depends(deps.get_db)):
     return crud.get_completion_stats(db, current_user.id)
 
+@app.post("/api/tasks/{task_id}/status")
+def update_task_status(task_id: int, status_update: schemas.TaskStatusUpdate, current_user: models.User = Depends(deps.get_current_user), db: Session = Depends(deps.get_db)):
+    task = crud.get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if current_user.role == models.UserRole.parent:
+        if task.created_by != current_user.id:
+            raise HTTPException(status_code=404, detail="Task not found")
+    elif current_user.role == models.UserRole.child:
+        assignment = (
+            db.query(models.TaskAssignment)
+            .filter(models.TaskAssignment.task_id == task_id, models.TaskAssignment.child_id == current_user.id)
+            .first()
+        )
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Task not found")
+    else:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    new_status = models.TaskStatus(status_update.status)
+    crud.update_task_status(db, task, current_user.id, new_status)
+    return {"message": "Task status updated"}
+
+@app.get("/api/parent/tasks/{task_id}/log", response_model=list[schemas.TaskStatusLogRead])
+def get_task_logs(task_id: int, current_user: models.User = Depends(deps.require_role(models.UserRole.parent)), db: Session = Depends(deps.get_db)):
+    task = crud.get_task(db, task_id)
+    if not task or task.created_by != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return crud.get_task_status_logs(db, task_id)
+
 @app.put("/api/parent/tasks/{task_id}", response_model=schemas.TaskRead)
 def update_task(task_id: int, task_update: schemas.TaskUpdate, current_user: models.User = Depends(deps.require_role(models.UserRole.parent)), db: Session = Depends(deps.get_db)):
     task = crud.get_task(db, task_id)
@@ -150,7 +180,7 @@ def complete_task(task_id: int, current_user: models.User = Depends(deps.require
         raise HTTPException(status_code=404, detail="Assignment not found")
     if assignment.completed:
         return {"message": "Task already completed"}
-    crud.mark_assignment_complete(db, assignment)
+    crud.mark_assignment_complete(db, assignment, current_user.id)
     return {"message": "Task marked completed"}
 
 @app.get("/api/me", response_model=schemas.UserRead)

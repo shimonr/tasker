@@ -9,7 +9,7 @@ export interface User {
   created_at: string
 }
 
-export type TaskStatus = 'pending' | 'completed'
+export type TaskStatus = 'pending' | 'in_progress' | 'failed' | 'completed'
 
 export interface Assignment {
   id: number
@@ -24,6 +24,7 @@ export interface Task {
   title: string
   description?: string
   due_date?: string
+  start_date?: string
   priority?: string
   recurrence?: 'daily' | 'weekly' | 'monthly' | 'yearly'
   status: TaskStatus

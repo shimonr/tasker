@@ -16,3 +16,7 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE tasks ADD COLUMN recurrence VARCHAR"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN start_date DATETIME"))
+        except Exception:
+            pass

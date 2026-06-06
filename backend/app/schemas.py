@@ -12,6 +12,8 @@ class UserRole(str, Enum):
 
 class TaskStatus(str, Enum):
     pending = "pending"
+    in_progress = "in_progress"
+    failed = "failed"
     completed = "completed"
 
 
@@ -63,6 +65,7 @@ class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None
     priority: Optional[str] = None
     assignee_ids: Optional[List[int]] = []
     recurrence: Optional[TaskRecurrence] = None
@@ -72,10 +75,27 @@ class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None
     priority: Optional[str] = None
     status: Optional[TaskStatus] = None
     assignee_ids: Optional[List[int]] = None
     recurrence: Optional[TaskRecurrence] = None
+
+
+class TaskStatusUpdate(BaseModel):
+    status: TaskStatus
+
+
+class TaskStatusLogRead(BaseModel):
+    id: int
+    task_id: int
+    changed_by: int
+    previous_status: TaskStatus
+    new_status: TaskStatus
+    changed_at: datetime
+
+    class Config:
+        orm_mode = True
 
 
 class AssignmentRead(BaseModel):
@@ -94,12 +114,14 @@ class TaskRead(BaseModel):
     title: str
     description: Optional[str] = None
     due_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None
     priority: Optional[str] = None
     recurrence: Optional[TaskRecurrence] = None
     status: TaskStatus
     created_by: int
     created_at: datetime
     assignments: List[AssignmentRead] = []
+    status_logs: List[TaskStatusLogRead] = []
 
     class Config:
         orm_mode = True

@@ -13,6 +13,8 @@ class UserRole(str, enum.Enum):
 
 class TaskStatus(str, enum.Enum):
     pending = "pending"
+    in_progress = "in_progress"
+    failed = "failed"
     completed = "completed"
 
 
@@ -38,6 +40,7 @@ class Task(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=True)
     priority = Column(String, nullable=True)
     status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.pending)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -47,6 +50,20 @@ class Task(Base):
 
     creator = relationship("User", back_populates="tasks_created")
     assignments = relationship("TaskAssignment", back_populates="task", cascade="all, delete")
+    status_logs = relationship("TaskStatusLog", back_populates="task", cascade="all, delete-orphan")
+
+
+class TaskStatusLog(Base):
+    __tablename__ = "task_status_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    changed_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    previous_status = Column(Enum(TaskStatus), nullable=False)
+    new_status = Column(Enum(TaskStatus), nullable=False)
+    changed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    task = relationship("Task", back_populates="status_logs")
 
 
 class TaskAssignment(Base):

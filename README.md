@@ -4,8 +4,8 @@ A lightweight family task manager with a React + TypeScript frontend and a FastA
 
 ## Version
 
-- Release state: **0.1**
-- This repository is prepared for the first tagged GitHub release at version `v0.1`.
+- Release state: **0.2**
+- This repository is prepared for the second tagged GitHub release at version `v0.2`.
 
 ## Architecture
 
@@ -72,6 +72,13 @@ cd backend
 pytest
 ```
 
+Frontend tests are available under `frontend/src` and can be run with Vitest:
+
+```bash
+cd frontend
+npm test
+```
+
 Developer dependencies are tracked in `backend/requirements-dev.txt`.
 
 ## API Endpoints
@@ -92,8 +99,8 @@ Developer dependencies are tracked in `backend/requirements-dev.txt`.
 ## Developer notes
 
 - The admin password reset UI now uses selectable user accounts from the admin user list.
-- The parent task creation form uses checkbox selection for children and supports task recurrence.
-- `frontend/src/api.ts` and `backend/app/main.py` now both support `/api/parent/children`.
+- The parent task creation form uses checkbox selection for children and supports task recurrence.- Parent dashboard now supports task deletion and recurring-task log modal behavior.
+- Recurring task schedule controls and status transitions are now localized to the schedule view.- `frontend/src/api.ts` and `backend/app/main.py` now both support `/api/parent/children`.
 - `backend/app/schemas.py` includes recurrence metadata for tasks.
 
 ## Environment variables
@@ -108,5 +115,5 @@ The app supports these optional environment variables:
 
 ## GitHub release process
 
-This state is intended as the first release version `0.1`.
-After initialization, the repository will be tagged as `v0.1` and pushed to GitHub.
+This state is intended as the second release version `0.2`.
+After updating the release metadata, the repository will be tagged as `v0.2` and pushed to GitHub.

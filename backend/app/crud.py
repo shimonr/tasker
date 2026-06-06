@@ -67,11 +67,23 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[models
     return user
 
 
+def create_status_log(db: Session, task: models.Task, user_id: int, new_status: models.TaskStatus):
+    log = models.TaskStatusLog(
+        task_id=task.id,
+        changed_by=user_id,
+        previous_status=task.status,
+        new_status=new_status,
+    )
+    db.add(log)
+    return log
+
+
 def create_task(db: Session, task_data: schemas.TaskCreate, creator_id: int) -> models.Task:
     task = models.Task(
         title=task_data.title,
         description=task_data.description,
         due_date=task_data.due_date,
+        start_date=task_data.start_date,
         priority=task_data.priority,
         recurrence=task_data.recurrence,
         created_by=creator_id,
@@ -80,6 +92,9 @@ def create_task(db: Session, task_data: schemas.TaskCreate, creator_id: int) -> 
     db.commit()
     db.refresh(task)
     assign_task(db, task.id, task_data.assignee_ids or [])
+    log = create_status_log(db, task, creator_id, task.status)
+    db.add(log)
+    db.commit()
     return task
 
 
@@ -143,22 +158,61 @@ def get_children(db: Session) -> list[models.User]:
     return db.query(models.User).filter(models.User.role == models.UserRole.child).order_by(models.User.created_at.desc()).all()
 
 
-def mark_assignment_complete(db: Session, assignment: models.TaskAssignment) -> models.TaskAssignment:
+def mark_assignment_complete(db: Session, assignment: models.TaskAssignment, user_id: int) -> models.TaskAssignment:
     assignment.completed = True
     assignment.completed_at = datetime.utcnow()
+    previous_status = assignment.task.status
     assignment.task.status = models.TaskStatus.completed
     db.add(assignment)
     db.add(assignment.task)
+    log = models.TaskStatusLog(
+        task_id=assignment.task.id,
+        changed_by=user_id,
+        previous_status=previous_status,
+        new_status=models.TaskStatus.completed,
+    )
+    db.add(log)
     db.commit()
     db.refresh(assignment)
     return assignment
 
 
+def get_task_status_logs(db: Session, task_id: int) -> List[models.TaskStatusLog]:
+    return (
+        db.query(models.TaskStatusLog)
+        .filter(models.TaskStatusLog.task_id == task_id)
+        .order_by(models.TaskStatusLog.changed_at.desc())
+        .all()
+    )
+
+
+def update_task_status(db: Session, task: models.Task, user_id: int, new_status: models.TaskStatus) -> models.Task:
+    previous_status = task.status
+    if previous_status == new_status:
+        return task
+    task.status = new_status
+    db.add(task)
+    log = models.TaskStatusLog(
+        task_id=task.id,
+        changed_by=user_id,
+        previous_status=previous_status,
+        new_status=new_status,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def get_completion_stats(db: Session, parent_id: int) -> dict:
     tasks = get_tasks_for_parent(db, parent_id)
     completed = sum(1 for task in tasks if task.status == models.TaskStatus.completed)
+    in_progress = sum(1 for task in tasks if task.status == models.TaskStatus.in_progress)
+    failed = sum(1 for task in tasks if task.status == models.TaskStatus.failed)
     return {
         "total_tasks": len(tasks),
         "completed_tasks": completed,
-        "pending_tasks": len(tasks) - completed,
+        "pending_tasks": len(tasks) - completed - in_progress - failed,
+        "in_progress_tasks": in_progress,
+        "failed_tasks": failed,
     }
