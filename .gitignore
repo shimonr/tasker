@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+*.pyc
+__pycache__
+backend/tasker.db
+frontend/node_modules
+.env
+.venv
+tasker.db

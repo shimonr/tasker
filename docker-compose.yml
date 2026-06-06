@@ -1,0 +1,20 @@
+version: '3.9'
+services:
+  backend:
+    build: ./backend
+    ports:
+      - '8000:8000'
+    volumes:
+      - ./backend:/app
+      - ./backend/tasker.db:/app/tasker.db
+    environment:
+      - FRONTEND_ORIGIN=http://localhost:5173
+  frontend:
+    working_dir: /app
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - '5173:5173'
+    volumes:
+      - ./frontend:/app
