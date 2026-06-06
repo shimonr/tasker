@@ -4,6 +4,8 @@ dist
 *.pyc
 __pycache__
 backend/tasker.db
+*.db
+*.db.bak
 frontend/node_modules
 .env
 .venv
