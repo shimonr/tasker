@@ -108,8 +108,8 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
       start_date: taskType === 'recurring' && startDate ? new Date(startDate).toISOString() : undefined,
       priority,
       assignee_ids: selectedChildIds,
-      recurrence: taskType === 'recurring' ? recurrence : undefined,
-      task_type: taskType,
+      recurrence: (taskType === 'recurring' ? recurrence : undefined) as 'daily' | 'weekly' | 'monthly' | 'yearly' | undefined,
+      task_type: taskType as 'adhoc' | 'recurring' | 'rotating',
     }
 
     if (editingTask) {

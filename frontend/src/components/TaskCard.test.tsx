@@ -1,16 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TaskCard from './TaskCard'
+import type { Task } from '../types'
 
 describe('TaskCard', () => {
-  const task = {
+  const task: Task = {
     id: 1,
     title: 'Do homework',
     description: 'Complete math problems',
     due_date: '2026-12-31T00:00:00.000Z',
     priority: 'High',
     recurrence: 'weekly',
-    task_type: 'recurring' as const,
+    task_type: 'recurring',
     status: 'pending',
     created_by: 1,
     created_at: '2026-01-01T00:00:00.000Z',
@@ -30,7 +31,7 @@ describe('TaskCard', () => {
 
   it('shows complete button for child view pending ad-hoc task', async () => {
     const onComplete = vi.fn()
-    const adHocTask = { ...task, recurrence: undefined, task_type: 'adhoc' as const, occurrences: [] }
+    const adHocTask: Task = { ...task, recurrence: undefined, task_type: 'adhoc', occurrences: [] }
     render(<TaskCard task={adHocTask} isChildView onComplete={onComplete} />)
 
     const button = screen.getByRole('button', { name: /mark completed/i })
@@ -41,23 +42,23 @@ describe('TaskCard', () => {
   })
 
   it('hides task type label in child view', () => {
-    const adHocTask = { ...task, recurrence: undefined, task_type: 'adhoc' as const, occurrences: [] }
+    const adHocTask: Task = { ...task, recurrence: undefined, task_type: 'adhoc', occurrences: [] }
     render(<TaskCard task={adHocTask} isChildView childId={2} />)
 
     expect(screen.queryByText('Ad-hoc task')).not.toBeInTheDocument()
   })
 
   it('hides assignee count in child view', () => {
-    const adHocTask = { ...task, recurrence: undefined, task_type: 'adhoc' as const, occurrences: [] }
+    const adHocTask: Task = { ...task, recurrence: undefined, task_type: 'adhoc', occurrences: [] }
     render(<TaskCard task={adHocTask} isChildView childId={2} />)
 
     expect(screen.queryByText('1 assignee')).not.toBeInTheDocument()
   })
 
   it('shows active label for rotating task in child view', () => {
-    const rotatingTask = {
+    const rotatingTask: Task = {
       ...task,
-      task_type: 'rotating' as const,
+      task_type: 'rotating',
       recurrence: undefined,
       occurrences: [],
       assignments: [
@@ -76,9 +77,9 @@ describe('TaskCard', () => {
       { id: 2, email: 'child1@test.com', role: 'child' as const, created_at: '2026-01-01', full_name: 'Alice' },
       { id: 3, email: 'child2@test.com', role: 'child' as const, created_at: '2026-01-01', full_name: 'Bob' },
     ]
-    const rotatingTask = {
+    const rotatingTask: Task = {
       ...task,
-      task_type: 'rotating' as const,
+      task_type: 'rotating',
       recurrence: undefined,
       occurrences: [],
       assignments: [
@@ -101,9 +102,9 @@ describe('TaskCard', () => {
 
   it('disables complete button for inactive rotating assignment in child view', () => {
     const onComplete = vi.fn()
-    const rotatingTask = {
+    const rotatingTask: Task = {
       ...task,
-      task_type: 'rotating' as const,
+      task_type: 'rotating',
       recurrence: undefined,
       occurrences: [],
       assignments: [

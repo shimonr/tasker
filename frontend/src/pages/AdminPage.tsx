@@ -19,7 +19,12 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
   const [users, setUsers] = useState<User[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [editingUserId, setEditingUserId] = useState<number | null>(null)
-  const [editUser, setEditUser] = useState({
+  const [editUser, setEditUser] = useState<{
+    username: string
+    email: string
+    full_name: string
+    role: 'admin' | 'parent' | 'child'
+  }>({
     username: '',
     email: '',
     full_name: '',
@@ -289,7 +294,7 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
                     {editingUserId === userItem.id ? (
                       <select
                         value={editUser.role}
-                        onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
+                        onChange={(e) => setEditUser({ ...editUser, role: e.target.value as 'admin' | 'parent' | 'child' })}
                         className="w-full rounded-2xl border border-slate-300 px-3 py-2 outline-none focus:border-brand-500"
                       >
                         <option value="admin">Admin</option>
