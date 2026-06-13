@@ -4,12 +4,12 @@ A lightweight family task manager with a React + TypeScript frontend and a FastA
 
 ## Version
 
-- Release state: **0.2**
-- This repository is prepared for the second tagged GitHub release at version `v0.2`.
+- Release state: **0.3**
+- GitHub release tag: `v0.3`
 
 ## Architecture
 
-- `backend/` — FastAPI REST API, SQLAlchemy models, SQLite persistence
+- `backend/` — FastAPI REST API, SQLAlchemy models, SQLite/PostgreSQL persistence
 - `frontend/` — Vite React TypeScript app with role-aware UI flows
 - `docker-compose.yml` — containerized backend + frontend for local development
 
@@ -17,9 +17,11 @@ A lightweight family task manager with a React + TypeScript frontend and a FastA
 
 - Admin user management and password reset
 - Parent task creation with child assignment and recurrence options
+- Rotating tasks with per-child active assignment
+- Per-occurrence tracking for recurring tasks
+- Task editing for all task types
 - Child task view with completion actions
 - JWT authentication and role-based access control
-- Task recurrence saved on backend and displayed in UI
 
 ## Setup
 
@@ -30,16 +32,10 @@ A lightweight family task manager with a React + TypeScript frontend and a FastA
    ```bash
    pip install -r requirements.txt
    ```
-3. (Optional) Install developer test dependencies:
-   ```bash
-   pip install -r requirements-dev.txt
-   ```
-4. Run the API:
+3. Run the API:
    ```bash
    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
-
-The backend stores its database file at `backend/tasker.db`.
 
 ### Frontend
 
@@ -63,57 +59,68 @@ docker compose up --build
 
 ## Testing
 
-Automated backend tests are available in `backend/tests`.
-
-From the backend folder:
-
+Backend tests:
 ```bash
 cd backend
 pytest
 ```
 
-Frontend tests are available under `frontend/src` and can be run with Vitest:
-
+Frontend tests:
 ```bash
 cd frontend
 npm test
 ```
 
-Developer dependencies are tracked in `backend/requirements-dev.txt`.
+## Deployment
+
+### Frontend (Vercel)
+
+1. Push to GitHub
+2. Go to [vercel.com](https://vercel.com) and import the repository
+3. Set the root directory to `frontend`
+4. Add environment variable:
+   - `VITE_API_BASE_URL` = `https://your-app.up.railway.app/api`
+5. Deploy
+
+### Backend (Railway)
+
+1. Go to [railway.app](https://railway.app) and import the repository
+2. Add a PostgreSQL database (free tier)
+3. Set environment variables:
+   - `DATABASE_URL` = (auto-set by Railway PostgreSQL)
+   - `FRONTEND_ORIGIN` = `https://your-app.vercel.app`
+   - `ADMIN_EMAIL` = `admin@example.com`
+   - `ADMIN_PASSWORD` = `your-secure-password`
+4. Deploy
+
+### Default Credentials
+
+- Admin: `admin@example.com` / `admin123`
+- Parent: `shimonro@hotmail.com` / `123`
+- Children: `shimon1974@gmail.com` / `123`, `kellycameronnew@gmail.com` / `123`
 
 ## API Endpoints
 
 - `POST /api/token` — login
-- `POST /api/admin/users` — create parent or child accounts (admin only)
-- `POST /api/admin/reset-password` — reset a user password (admin only)
-- `POST /api/parent/tasks` — create tasks (parent only)
-- `GET /api/parent/tasks` — list tasks (parent only)
-- `GET /api/parent/tasks/stats` — task completion summary (parent only)
-- `PUT /api/parent/tasks/{task_id}` — update task (parent only)
-- `DELETE /api/parent/tasks/{task_id}` — delete task (parent only)
-- `GET /api/parent/children` — list child accounts for assignment (parent only)
-- `GET /api/child/tasks` — child task list (child only)
-- `POST /api/child/tasks/{task_id}/complete` — mark task completed (child only)
+- `POST /api/admin/users` — create user (admin)
+- `POST /api/admin/reset-password` — reset password (admin)
+- `POST /api/parent/tasks` — create task (parent)
+- `GET /api/parent/tasks` — list tasks (parent)
+- `PUT /api/parent/tasks/{task_id}` — update task (parent)
+- `DELETE /api/parent/tasks/{task_id}` — delete task (parent)
+- `POST /api/parent/tasks/{task_id}/advance` — advance rotating task (parent)
+- `GET /api/parent/children` — list children (parent)
+- `GET /api/child/tasks` — child task list (child)
+- `POST /api/child/tasks/{task_id}/complete` — complete task (child)
+- `GET /api/tasks/{task_id}/occurrences` — list occurrences
+- `PUT /api/occurrences/{occurrence_id}/status` — update occurrence status
+- `POST /api/occurrences/{occurrence_id}/complete` — complete occurrence
 - `GET /api/me` — current user info
 
-## Developer notes
+## Environment Variables
 
-- The admin password reset UI now uses selectable user accounts from the admin user list.
-- The parent task creation form uses checkbox selection for children and supports task recurrence.- Parent dashboard now supports task deletion and recurring-task log modal behavior.
-- Recurring task schedule controls and status transitions are now localized to the schedule view.- `frontend/src/api.ts` and `backend/app/main.py` now both support `/api/parent/children`.
-- `backend/app/schemas.py` includes recurrence metadata for tasks.
-
-## Environment variables
-
-The app supports these optional environment variables:
-
+- `DATABASE_URL` — database connection string (defaults to SQLite)
+- `FRONTEND_ORIGIN` — allowed CORS origin
 - `ADMIN_EMAIL` — default admin email
 - `ADMIN_PASSWORD` — default admin password
 - `ADMIN_USERNAME` — default admin username
-- `FRONTEND_ORIGIN` — allowed CORS origin for the frontend
-- `TASKER_SECRET_KEY` — JWT signing secret
-
-## GitHub release process
-
-This state is intended as the second release version `0.2`.
-After updating the release metadata, the repository will be tagged as `v0.2` and pushed to GitHub.
