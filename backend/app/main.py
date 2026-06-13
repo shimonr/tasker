@@ -105,6 +105,9 @@ def reset_password(
 
 @app.post("/api/parent/tasks", response_model=schemas.TaskRead)
 def create_task(task_in: schemas.TaskCreate, current_user: models.User = Depends(deps.require_role(models.UserRole.parent)), db: Session = Depends(deps.get_db)):
+    if task_in.task_type == schemas.TaskType.rotating:
+        if not task_in.assignee_ids or len(task_in.assignee_ids) < 2:
+            raise HTTPException(status_code=400, detail="Rotating tasks require at least 2 assignees")
     return crud.create_task(db, task_in, current_user.id)
 
 @app.get("/api/parent/children", response_model=list[schemas.UserRead])
@@ -164,10 +167,72 @@ def delete_task(task_id: int, current_user: models.User = Depends(deps.require_r
     crud.delete_task(db, task)
     return {"message": "Task deleted"}
 
+@app.post("/api/parent/tasks/{task_id}/advance", response_model=schemas.TaskRead)
+def advance_rotating_task(task_id: int, current_user: models.User = Depends(deps.require_role(models.UserRole.parent)), db: Session = Depends(deps.get_db)):
+    task = crud.get_task(db, task_id)
+    if not task or task.created_by != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.task_type != models.TaskType.rotating:
+        raise HTTPException(status_code=400, detail="Only rotating tasks can be advanced")
+    updated_task = crud.advance_rotating_task(db, task_id, current_user.id)
+    return updated_task
+
 @app.get("/api/child/tasks", response_model=list[schemas.TaskRead])
 def get_child_tasks(current_user: models.User = Depends(deps.require_role(models.UserRole.child)), db: Session = Depends(deps.get_db)):
     assignments = crud.get_tasks_for_child(db, current_user.id)
     return [assignment.task for assignment in assignments]
+
+@app.get("/api/tasks/{task_id}/occurrences", response_model=list[schemas.OccurrenceRead])
+def get_task_occurrences(task_id: int, current_user: models.User = Depends(deps.get_current_user), db: Session = Depends(deps.get_db)):
+    task = crud.get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if current_user.role == models.UserRole.child:
+        assignment = (
+            db.query(models.TaskAssignment)
+            .filter(models.TaskAssignment.task_id == task_id, models.TaskAssignment.child_id == current_user.id)
+            .first()
+        )
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Task not found")
+    elif current_user.role == models.UserRole.parent:
+        if task.created_by != current_user.id:
+            raise HTTPException(status_code=404, detail="Task not found")
+    return crud.get_occurrences_for_task(db, task_id)
+
+@app.put("/api/occurrences/{occurrence_id}/status")
+def update_occurrence_status(occurrence_id: int, status_update: schemas.TaskStatusUpdate, current_user: models.User = Depends(deps.get_current_user), db: Session = Depends(deps.get_db)):
+    occurrence = crud.get_occurrence(db, occurrence_id)
+    if not occurrence:
+        raise HTTPException(status_code=404, detail="Occurrence not found")
+    task = crud.get_task(db, occurrence.task_id)
+    if current_user.role == models.UserRole.child:
+        assignment = (
+            db.query(models.TaskAssignment)
+            .filter(models.TaskAssignment.task_id == task.id, models.TaskAssignment.child_id == current_user.id)
+            .first()
+        )
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Task not found")
+    elif current_user.role == models.UserRole.parent:
+        if task.created_by != current_user.id:
+            raise HTTPException(status_code=404, detail="Task not found")
+    new_status = models.TaskStatus(status_update.status)
+    return crud.update_occurrence_status(db, occurrence, current_user.id, new_status)
+
+@app.post("/api/occurrences/{occurrence_id}/complete")
+def complete_occurrence(occurrence_id: int, current_user: models.User = Depends(deps.require_role(models.UserRole.child)), db: Session = Depends(deps.get_db)):
+    occurrence = crud.get_occurrence(db, occurrence_id)
+    if not occurrence:
+        raise HTTPException(status_code=404, detail="Occurrence not found")
+    assignment = (
+        db.query(models.TaskAssignment)
+        .filter(models.TaskAssignment.task_id == occurrence.task_id, models.TaskAssignment.child_id == current_user.id)
+        .first()
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return crud.complete_occurrence(db, occurrence, current_user.id)
 
 @app.post("/api/child/tasks/{task_id}/complete")
 def complete_task(task_id: int, current_user: models.User = Depends(deps.require_role(models.UserRole.child)), db: Session = Depends(deps.get_db)):
@@ -180,6 +245,8 @@ def complete_task(task_id: int, current_user: models.User = Depends(deps.require
         raise HTTPException(status_code=404, detail="Assignment not found")
     if assignment.completed:
         return {"message": "Task already completed"}
+    if assignment.task.task_type == models.TaskType.rotating and not assignment.is_active:
+        raise HTTPException(status_code=400, detail="This task is not active for you yet")
     crud.mark_assignment_complete(db, assignment, current_user.id)
     return {"message": "Task marked completed"}
 

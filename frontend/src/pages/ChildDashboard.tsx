@@ -11,6 +11,7 @@ interface ChildDashboardProps {
 
 export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) {
   const [tasks, setTasks] = useState<Task[]>([])
+  const childId = user.id
 
   const loadTasks = async () => {
     setTasks(await fetchChildTasks())
@@ -30,11 +31,12 @@ export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) 
     loadTasks()
   }
 
-  const adHocTasks = tasks.filter((task) => !task.recurrence)
-  const dailyTasks = tasks.filter((task) => task.recurrence === 'daily')
-  const weeklyTasks = tasks.filter((task) => task.recurrence === 'weekly')
-  const monthlyTasks = tasks.filter((task) => task.recurrence === 'monthly')
-  const yearlyTasks = tasks.filter((task) => task.recurrence === 'yearly')
+  const adHocTasks = tasks.filter((task) => task.task_type === 'adhoc' && !task.recurrence)
+  const dailyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'daily')
+  const weeklyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'weekly')
+  const monthlyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'monthly')
+  const yearlyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'yearly')
+  const rotatingTasks = tasks.filter((task) => task.task_type === 'rotating')
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -71,7 +73,7 @@ export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) 
                 <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No ad-hoc tasks assigned yet.</div>
               ) : (
                 adHocTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView />
+                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
                 ))
               )}
             </div>
@@ -90,7 +92,7 @@ export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) 
                 <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No daily tasks assigned yet.</div>
               ) : (
                 dailyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView />
+                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
                 ))
               )}
             </div>
@@ -109,7 +111,7 @@ export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) 
                 <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No weekly tasks assigned yet.</div>
               ) : (
                 weeklyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView />
+                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
                 ))
               )}
             </div>
@@ -128,7 +130,7 @@ export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) 
                 <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No monthly tasks assigned yet.</div>
               ) : (
                 monthlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView />
+                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
                 ))
               )}
             </div>
@@ -147,7 +149,26 @@ export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) 
                 <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No yearly tasks assigned yet.</div>
               ) : (
                 yearlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView />
+                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Rotating</p>
+                <h3 className="mt-2 text-2xl font-semibold text-slate-900">Rotating tasks</h3>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">{rotatingTasks.length} items</span>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {rotatingTasks.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No rotating tasks assigned yet.</div>
+              ) : (
+                rotatingTasks.map((task) => (
+                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
                 ))
               )}
             </div>

@@ -18,6 +18,12 @@ class TaskStatus(str, enum.Enum):
     completed = "completed"
 
 
+class TaskType(str, enum.Enum):
+    adhoc = "adhoc"
+    recurring = "recurring"
+    rotating = "rotating"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -47,10 +53,12 @@ class Task(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     recurrence = Column(String, nullable=True)
+    task_type = Column(Enum(TaskType), nullable=False, default=TaskType.adhoc)
 
     creator = relationship("User", back_populates="tasks_created")
     assignments = relationship("TaskAssignment", back_populates="task", cascade="all, delete")
     status_logs = relationship("TaskStatusLog", back_populates="task", cascade="all, delete-orphan")
+    occurrences = relationship("TaskOccurrence", back_populates="task", cascade="all, delete-orphan")
 
 
 class TaskStatusLog(Base):
@@ -75,6 +83,20 @@ class TaskAssignment(Base):
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
     completed = Column(Boolean, default=False)
+    rotation_order = Column(Integer, nullable=True)
+    is_active = Column(Boolean, default=True)
 
     task = relationship("Task", back_populates="assignments")
     child = relationship("User", back_populates="assignments")
+
+
+class TaskOccurrence(Base):
+    __tablename__ = "task_occurrences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    occurrence_date = Column(DateTime(timezone=True), nullable=False)
+    status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.pending)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    task = relationship("Task", back_populates="occurrences")

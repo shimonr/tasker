@@ -20,3 +20,19 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE tasks ADD COLUMN start_date DATETIME"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN task_type VARCHAR DEFAULT 'adhoc'"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE task_assignments ADD COLUMN rotation_order INTEGER"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE task_assignments ADD COLUMN is_active BOOLEAN DEFAULT 1"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("UPDATE tasks SET task_type = 'recurring' WHERE recurrence IS NOT NULL AND task_type = 'adhoc'"))
+        except Exception:
+            pass

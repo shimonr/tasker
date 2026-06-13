@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { Task, User } from './types'
+import { Task, User, Occurrence } from './types'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api',
@@ -112,8 +112,18 @@ export const deleteTask = async (taskId: number) => {
   return response.data
 }
 
+export const advanceTask = async (taskId: number) => {
+  const response = await api.post<Task>(`/parent/tasks/${taskId}/advance`)
+  return response.data
+}
+
+export const updateTask = async (taskId: number, task: Partial<Task> & { assignee_ids?: number[]; recurrence?: string; task_type?: string }) => {
+  const response = await api.put<Task>(`/parent/tasks/${taskId}`, task)
+  return response.data
+}
+
 export const createTask = async (
-  task: Partial<Task> & { assignee_ids: number[]; recurrence?: string; start_date?: string }
+  task: Partial<Task> & { assignee_ids: number[]; recurrence?: string; task_type?: string; start_date?: string }
 ) => {
   const response = await api.post<Task>('/parent/tasks', task)
   return response.data
@@ -132,6 +142,21 @@ export const createUser = async (user: {
 
 export const resetPassword = async (email: string, password: string) => {
   const response = await api.post('/admin/reset-password', { email, new_password: password })
+  return response.data
+}
+
+export const fetchOccurrences = async (taskId: number) => {
+  const response = await api.get<Occurrence[]>(`/tasks/${taskId}/occurrences`)
+  return response.data
+}
+
+export const updateOccurrenceStatus = async (occurrenceId: number, status: string) => {
+  const response = await api.put(`/occurrences/${occurrenceId}/status`, { status })
+  return response.data
+}
+
+export const completeOccurrence = async (occurrenceId: number) => {
+  const response = await api.post(`/occurrences/${occurrenceId}/complete`)
   return response.data
 }
 

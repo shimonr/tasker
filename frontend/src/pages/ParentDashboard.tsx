@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { createTask, deleteTask, fetchChildren, fetchParentTasks, fetchStats, fetchTaskLogs, updateTaskStatus } from '../api'
+import { createTask, deleteTask, fetchChildren, fetchParentTasks, fetchStats, fetchTaskLogs, updateTaskStatus, updateTask, advanceTask } from '../api'
 import { Task, User } from '../types'
 import Navbar from '../components/Navbar'
 import TaskCard from '../components/TaskCard'
@@ -21,7 +21,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
   const [stats, setStats] = useState({ total_tasks: 0, completed_tasks: 0, pending_tasks: 0, in_progress_tasks: 0, failed_tasks: 0 })
   const [children, setChildren] = useState<User[]>([])
   const [selectedChildIds, setSelectedChildIds] = useState<number[]>([])
-  const [taskType, setTaskType] = useState<'adhoc' | 'recurring'>('adhoc')
+  const [taskType, setTaskType] = useState<'adhoc' | 'recurring' | 'rotating'>('adhoc')
   const [recurrence, setRecurrence] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -29,9 +29,11 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
   const [startDate, setStartDate] = useState('')
   const [priority, setPriority] = useState('Medium')
   const [formError, setFormError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const [selectedTab, setSelectedTab] = useState<number | 'all'>('all')
   const [taskLogs, setTaskLogs] = useState<Record<number, any[]>>({})
   const [activeLogTaskId, setActiveLogTaskId] = useState<number | null>(null)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
 
   const loadTasks = async () => {
     setTasks(await fetchParentTasks())
@@ -53,6 +55,18 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
     )
   }
 
+  const resetForm = () => {
+    setTitle('')
+    setDescription('')
+    setDueDate('')
+    setStartDate('')
+    setPriority('Medium')
+    setSelectedChildIds([])
+    setRecurrence('')
+    setFormError('')
+    setEditingTask(null)
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setFormError('')
@@ -62,9 +76,24 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
       return
     }
 
+    if (taskType === 'rotating' && selectedChildIds.length < 2) {
+      setFormError('Rotating tasks require at least 2 children.')
+      return
+    }
+
     if (taskType === 'adhoc' && !dueDate) {
       setFormError('Ad-hoc tasks require a due date.')
       return
+    }
+
+    if (taskType === 'adhoc' && dueDate) {
+      const selectedDate = new Date(dueDate)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      if (selectedDate < today) {
+        setFormError('Due date cannot be in the past.')
+        return
+      }
     }
 
     if (taskType === 'recurring' && !recurrence) {
@@ -72,7 +101,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
       return
     }
 
-    await createTask({
+    const taskData = {
       title,
       description,
       due_date: taskType === 'adhoc' && dueDate ? new Date(dueDate).toISOString() : undefined,
@@ -80,16 +109,45 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
       priority,
       assignee_ids: selectedChildIds,
       recurrence: taskType === 'recurring' ? recurrence : undefined,
-    })
-    setTitle('')
-    setDescription('')
-    setDueDate('')
-    setStartDate('')
-    setPriority('Medium')
-    setSelectedChildIds([])
-    setRecurrence('')
-    setFormError('')
+      task_type: taskType,
+    }
+
+    if (editingTask) {
+      await updateTask(editingTask.id, taskData)
+      setSuccessMessage('Task updated successfully!')
+    } else {
+      await createTask(taskData)
+      setSuccessMessage('Task created successfully!')
+    }
+
+    resetForm()
+    setTimeout(() => setSuccessMessage(''), 3000)
     loadTasks()
+  }
+
+  const handleEditTask = (task: Task) => {
+    setEditingTask(task)
+    setTitle(task.title)
+    setDescription(task.description || '')
+    setPriority(task.priority || 'Medium')
+    setTaskType(task.task_type === 'rotating' ? 'rotating' : task.recurrence ? 'recurring' : 'adhoc')
+    setRecurrence(task.recurrence || '')
+    setSelectedChildIds(task.assignments.map((a) => a.child_id))
+
+    if (task.due_date) {
+      const d = new Date(task.due_date)
+      setDueDate(d.toISOString().split('T')[0])
+    } else {
+      setDueDate('')
+    }
+    if (task.start_date) {
+      const s = new Date(task.start_date)
+      setStartDate(s.toISOString().split('T')[0])
+    } else {
+      setStartDate('')
+    }
+
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const selectedTasks = useMemo(
@@ -100,11 +158,12 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
     [selectedTab, tasks]
   )
 
-  const adHocTasks = selectedTasks.filter((task) => !task.recurrence)
-  const dailyTasks = selectedTasks.filter((task) => task.recurrence === 'daily')
-  const weeklyTasks = selectedTasks.filter((task) => task.recurrence === 'weekly')
-  const monthlyTasks = selectedTasks.filter((task) => task.recurrence === 'monthly')
-  const yearlyTasks = selectedTasks.filter((task) => task.recurrence === 'yearly')
+  const adHocTasks = selectedTasks.filter((task) => task.task_type === 'adhoc' && !task.recurrence)
+  const dailyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'daily')
+  const weeklyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'weekly')
+  const monthlyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'monthly')
+  const yearlyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'yearly')
+  const rotatingTasks = selectedTasks.filter((task) => task.task_type === 'rotating')
 
   const handleStatusChange = async (taskId: number, status: string) => {
     await updateTaskStatus(taskId, status)
@@ -134,10 +193,21 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
     }
   }
 
+  const handleAdvance = async (taskId: number) => {
+    await advanceTask(taskId)
+    await loadTasks()
+  }
+
+  const getUserName = (userId: number) => {
+    if (userId === user.id) return user.full_name || user.email
+    const child = children.find((c) => c.id === userId)
+    return child?.full_name || child?.username || child?.email || `User #${userId}`
+  }
+
   const activeLogTask = activeLogTaskId !== null ? tasks.find((task) => task.id === activeLogTaskId) : undefined
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
+    <div className="relative mx-auto max-w-6xl px-4 py-8">
       <Navbar
         title={`Welcome, ${user.full_name || user.email}`}
         actions={
@@ -147,18 +217,27 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
         }
       />
       <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+        {successMessage && (
+          <div className="absolute top-4 left-1/2 z-50 -translate-x-1/2 rounded-2xl bg-emerald-500 px-6 py-3 text-sm font-semibold text-white shadow-lg transition-opacity">
+            {successMessage}
+          </div>
+        )}
         <article className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200">
-          <h2 className="text-2xl font-semibold text-slate-900">Create a task</h2>
+          <h2 className="text-2xl font-semibold text-slate-900">{editingTask ? 'Edit task' : 'Create a task'}</h2>
           <p className="mt-2 text-sm text-kids-700">Make chores exciting by assigning clear tasks and rewards.</p>
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input type="radio" checked={taskType === 'adhoc'} onChange={() => setTaskType('adhoc')} />
+                <input type="radio" checked={taskType === 'adhoc'} onChange={() => setTaskType('adhoc')} disabled={!!editingTask} />
                 <span>Ad-hoc task</span>
               </label>
               <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input type="radio" checked={taskType === 'recurring'} onChange={() => setTaskType('recurring')} />
+                <input type="radio" checked={taskType === 'recurring'} onChange={() => setTaskType('recurring')} disabled={!!editingTask} />
                 <span>Recurring task</span>
+              </label>
+              <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <input type="radio" checked={taskType === 'rotating'} onChange={() => setTaskType('rotating')} disabled={!!editingTask} />
+                <span>Rotating task</span>
               </label>
             </div>
             <input
@@ -176,21 +255,13 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
               rows={4}
             />
             <div className="grid gap-4 md:grid-cols-2">
-              {taskType === 'adhoc' ? (
+              {taskType === 'adhoc' && (
                 <input
                   type="date"
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
                   className="rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-brand-500"
                   required
-                />
-              ) : (
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-brand-500"
-                  placeholder="Start date"
                 />
               )}
               <select
@@ -242,9 +313,20 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
               </div>
             </div>
             {formError && <p className="text-sm text-rose-600">{formError}</p>}
-            <button className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-white transition hover:bg-brand-600">
-              Create task
-            </button>
+            <div className="flex gap-3">
+              <button className="flex-1 rounded-2xl bg-brand-500 px-4 py-3 text-white transition hover:bg-brand-600">
+                {editingTask ? 'Update task' : 'Create task'}
+              </button>
+              {editingTask && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-700 transition hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </form>
         </article>
         <article className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200">
@@ -308,7 +390,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
                 <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No ad-hoc tasks yet.</div>
               ) : (
                 adHocTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} />
+                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
                 ))
               )}
             </div>
@@ -321,7 +403,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
                 <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No daily tasks yet.</div>
               ) : (
                 dailyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} />
+                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
                 ))
               )}
             </div>
@@ -334,7 +416,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
                 <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No weekly tasks yet.</div>
               ) : (
                 weeklyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} />
+                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
                 ))
               )}
             </div>
@@ -347,7 +429,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
                 <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No monthly tasks yet.</div>
               ) : (
                 monthlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} />
+                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
                 ))
               )}
             </div>
@@ -360,7 +442,20 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
                 <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No yearly tasks yet.</div>
               ) : (
                 yearlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} />
+                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
+                ))
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-4 text-xl font-semibold text-slate-900">Rotating</h3>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {rotatingTasks.length === 0 ? (
+                <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No rotating tasks yet.</div>
+              ) : (
+                rotatingTasks.map((task) => (
+                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
                 ))
               )}
             </div>
@@ -389,7 +484,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
                     <div key={log.id} className="rounded-3xl bg-slate-50 p-4 shadow-sm">
                       <p className="text-sm text-slate-500">{new Date(log.changed_at).toLocaleString()}</p>
                       <p className="mt-2 text-sm text-slate-700">
-                        {log.changed_by} changed from <strong>{statusLabel[log.previous_status] || log.previous_status}</strong> to <strong>{statusLabel[log.new_status] || log.new_status}</strong>
+                        {getUserName(log.changed_by)} changed from <strong>{statusLabel[log.previous_status] || log.previous_status}</strong> to <strong>{statusLabel[log.new_status] || log.new_status}</strong>
                       </p>
                     </div>
                   ))}

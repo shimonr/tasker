@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -86,22 +86,62 @@ def create_task(db: Session, task_data: schemas.TaskCreate, creator_id: int) -> 
         start_date=task_data.start_date,
         priority=task_data.priority,
         recurrence=task_data.recurrence,
+        task_type=task_data.task_type or models.TaskType.adhoc,
         created_by=creator_id,
     )
     db.add(task)
     db.commit()
     db.refresh(task)
-    assign_task(db, task.id, task_data.assignee_ids or [])
+    assign_task(db, task.id, task_data.assignee_ids or [], task.task_type)
+    if task.task_type == models.TaskType.recurring and task.recurrence:
+        generate_occurrences(db, task)
     log = create_status_log(db, task, creator_id, task.status)
     db.add(log)
     db.commit()
     return task
 
 
-def assign_task(db: Session, task_id: int, child_ids: List[int]) -> None:
+def generate_occurrences(db: Session, task: models.Task) -> None:
+    start = task.start_date or datetime.utcnow()
+    today = datetime.utcnow()
+    current = start
+    count = 0
+    max_occurrences = 52
+
+    while current <= today and count < max_occurrences:
+        occurrence = models.TaskOccurrence(
+            task_id=task.id,
+            occurrence_date=current,
+            status=models.TaskStatus.pending,
+        )
+        db.add(occurrence)
+        count += 1
+        if task.recurrence == 'daily':
+            current += timedelta(days=1)
+        elif task.recurrence == 'weekly':
+            current += timedelta(weeks=1)
+        elif task.recurrence == 'monthly':
+            month = current.month + 1
+            year = current.year
+            if month > 12:
+                month = 1
+                year += 1
+            current = current.replace(year=year, month=month)
+        elif task.recurrence == 'yearly':
+            current = current.replace(year=current.year + 1)
+
+    db.commit()
+
+
+def assign_task(db: Session, task_id: int, child_ids: List[int], task_type: models.TaskType = models.TaskType.adhoc) -> None:
     db.query(models.TaskAssignment).filter(models.TaskAssignment.task_id == task_id).delete()
-    for child_id in child_ids:
-        assignment = models.TaskAssignment(task_id=task_id, child_id=child_id)
+    for idx, child_id in enumerate(child_ids):
+        assignment = models.TaskAssignment(
+            task_id=task_id,
+            child_id=child_id,
+            rotation_order=idx if task_type == models.TaskType.rotating else None,
+            is_active=(idx == 0) if task_type == models.TaskType.rotating else True,
+        )
         db.add(assignment)
     db.commit()
 
@@ -126,7 +166,12 @@ def get_tasks_for_parent(db: Session, parent_id: int, status: Optional[str] = No
 def get_tasks_for_child(db: Session, child_id: int) -> List[models.TaskAssignment]:
     return (
         db.query(models.TaskAssignment)
+        .join(models.Task)
         .filter(models.TaskAssignment.child_id == child_id)
+        .filter(
+            (models.Task.task_type != models.TaskType.rotating)
+            | ((models.Task.task_type == models.TaskType.rotating) & (models.TaskAssignment.is_active == True))
+        )
         .order_by(models.TaskAssignment.assigned_at.desc())
         .all()
     )
@@ -135,7 +180,7 @@ def get_tasks_for_child(db: Session, child_id: int) -> List[models.TaskAssignmen
 def update_task(db: Session, task: models.Task, task_update: schemas.TaskUpdate) -> models.Task:
     for field, value in task_update.dict(exclude_unset=True).items():
         if field == "assignee_ids":
-            assign_task(db, task.id, value)
+            assign_task(db, task.id, value, task.task_type)
             continue
         setattr(task, field, value)
     db.add(task)
@@ -147,6 +192,64 @@ def update_task(db: Session, task: models.Task, task_update: schemas.TaskUpdate)
 def delete_task(db: Session, task: models.Task) -> None:
     db.delete(task)
     db.commit()
+
+
+def advance_rotating_task(db: Session, task_id: int, user_id: int) -> models.Task:
+    task = get_task(db, task_id)
+    if not task or task.task_type != models.TaskType.rotating:
+        return None
+
+    current_active = (
+        db.query(models.TaskAssignment)
+        .filter(
+            models.TaskAssignment.task_id == task_id,
+            models.TaskAssignment.is_active == True,
+        )
+        .first()
+    )
+
+    if current_active:
+        current_active.is_active = False
+        db.add(current_active)
+
+    next_assignment = (
+        db.query(models.TaskAssignment)
+        .filter(
+            models.TaskAssignment.task_id == task_id,
+            models.TaskAssignment.is_active == False,
+            models.TaskAssignment.completed == False,
+        )
+        .order_by(models.TaskAssignment.rotation_order)
+        .first()
+    )
+
+    if not next_assignment:
+        next_assignment = (
+            db.query(models.TaskAssignment)
+            .filter(
+                models.TaskAssignment.task_id == task_id,
+                models.TaskAssignment.is_active == False,
+            )
+            .order_by(models.TaskAssignment.rotation_order)
+            .first()
+        )
+
+    if next_assignment:
+        next_assignment.is_active = True
+        db.add(next_assignment)
+        task.status = models.TaskStatus.pending
+        db.add(task)
+
+    log = models.TaskStatusLog(
+        task_id=task_id,
+        changed_by=user_id,
+        previous_status=task.status,
+        new_status=task.status,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 def delete_user(db: Session, user: models.User) -> None:
@@ -161,15 +264,36 @@ def get_children(db: Session) -> list[models.User]:
 def mark_assignment_complete(db: Session, assignment: models.TaskAssignment, user_id: int) -> models.TaskAssignment:
     assignment.completed = True
     assignment.completed_at = datetime.utcnow()
+    assignment.is_active = False
     previous_status = assignment.task.status
-    assignment.task.status = models.TaskStatus.completed
+
+    if assignment.task.task_type == models.TaskType.rotating:
+        next_assignment = (
+            db.query(models.TaskAssignment)
+            .filter(
+                models.TaskAssignment.task_id == assignment.task.id,
+                models.TaskAssignment.id != assignment.id,
+                models.TaskAssignment.completed == False,
+            )
+            .order_by(models.TaskAssignment.rotation_order)
+            .first()
+        )
+        if next_assignment:
+            assignment.task.status = models.TaskStatus.pending
+            next_assignment.is_active = True
+            db.add(next_assignment)
+        else:
+            assignment.task.status = models.TaskStatus.completed
+    else:
+        assignment.task.status = models.TaskStatus.completed
+
     db.add(assignment)
     db.add(assignment.task)
     log = models.TaskStatusLog(
         task_id=assignment.task.id,
         changed_by=user_id,
         previous_status=previous_status,
-        new_status=models.TaskStatus.completed,
+        new_status=assignment.task.status,
     )
     db.add(log)
     db.commit()
@@ -216,3 +340,54 @@ def get_completion_stats(db: Session, parent_id: int) -> dict:
         "in_progress_tasks": in_progress,
         "failed_tasks": failed,
     }
+
+
+def get_occurrences_for_task(db: Session, task_id: int) -> List[models.TaskOccurrence]:
+    return (
+        db.query(models.TaskOccurrence)
+        .filter(models.TaskOccurrence.task_id == task_id)
+        .order_by(models.TaskOccurrence.occurrence_date.desc())
+        .all()
+    )
+
+
+def get_occurrence(db: Session, occurrence_id: int) -> Optional[models.TaskOccurrence]:
+    return db.query(models.TaskOccurrence).filter(models.TaskOccurrence.id == occurrence_id).first()
+
+
+def update_occurrence_status(db: Session, occurrence: models.TaskOccurrence, user_id: int, new_status: models.TaskStatus) -> models.TaskOccurrence:
+    previous_status = occurrence.status
+    if previous_status == new_status:
+        return occurrence
+    occurrence.status = new_status
+    if new_status == models.TaskStatus.completed:
+        occurrence.completed_at = datetime.utcnow()
+    db.add(occurrence)
+    log = models.TaskStatusLog(
+        task_id=occurrence.task_id,
+        changed_by=user_id,
+        previous_status=previous_status,
+        new_status=new_status,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(occurrence)
+    return occurrence
+
+
+def complete_occurrence(db: Session, occurrence: models.TaskOccurrence, user_id: int) -> models.TaskOccurrence:
+    if occurrence.status == models.TaskStatus.completed:
+        return occurrence
+    occurrence.status = models.TaskStatus.completed
+    occurrence.completed_at = datetime.utcnow()
+    db.add(occurrence)
+    log = models.TaskStatusLog(
+        task_id=occurrence.task_id,
+        changed_by=user_id,
+        previous_status=occurrence.status,
+        new_status=models.TaskStatus.completed,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(occurrence)
+    return occurrence

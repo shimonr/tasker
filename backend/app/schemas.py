@@ -24,6 +24,12 @@ class TaskRecurrence(str, Enum):
     yearly = "yearly"
 
 
+class TaskType(str, Enum):
+    adhoc = "adhoc"
+    recurring = "recurring"
+    rotating = "rotating"
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -69,6 +75,7 @@ class TaskCreate(BaseModel):
     priority: Optional[str] = None
     assignee_ids: Optional[List[int]] = []
     recurrence: Optional[TaskRecurrence] = None
+    task_type: Optional[TaskType] = TaskType.adhoc
 
 
 class TaskUpdate(BaseModel):
@@ -80,6 +87,7 @@ class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None
     assignee_ids: Optional[List[int]] = None
     recurrence: Optional[TaskRecurrence] = None
+    task_type: Optional[TaskType] = None
 
 
 class TaskStatusUpdate(BaseModel):
@@ -104,6 +112,19 @@ class AssignmentRead(BaseModel):
     completed: bool
     completed_at: Optional[datetime] = None
     assigned_at: datetime
+    rotation_order: Optional[int] = None
+    is_active: bool = True
+
+    class Config:
+        orm_mode = True
+
+
+class OccurrenceRead(BaseModel):
+    id: int
+    task_id: int
+    occurrence_date: datetime
+    status: TaskStatus
+    completed_at: Optional[datetime] = None
 
     class Config:
         orm_mode = True
@@ -117,11 +138,13 @@ class TaskRead(BaseModel):
     start_date: Optional[datetime] = None
     priority: Optional[str] = None
     recurrence: Optional[TaskRecurrence] = None
+    task_type: TaskType = TaskType.adhoc
     status: TaskStatus
     created_by: int
     created_at: datetime
     assignments: List[AssignmentRead] = []
     status_logs: List[TaskStatusLogRead] = []
+    occurrences: List[OccurrenceRead] = []
 
     class Config:
         orm_mode = True
