@@ -199,6 +199,8 @@ def advance_rotating_task(db: Session, task_id: int, user_id: int) -> models.Tas
     if not task or task.task_type != models.TaskType.rotating:
         return None
 
+    previous_status = task.status
+
     current_active = (
         db.query(models.TaskAssignment)
         .filter(
@@ -243,7 +245,7 @@ def advance_rotating_task(db: Session, task_id: int, user_id: int) -> models.Tas
     log = models.TaskStatusLog(
         task_id=task_id,
         changed_by=user_id,
-        previous_status=task.status,
+        previous_status=previous_status,
         new_status=task.status,
     )
     db.add(log)

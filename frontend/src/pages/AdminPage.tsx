@@ -31,8 +31,9 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
     role: 'parent',
   })
   const [userToDelete, setUserToDelete] = useState<User | null>(null)
-  const [message, setMessage] = useState('')
-  const [messageType, setMessageType] = useState<'success' | 'error'>('success')
+  const [toastMessage, setToastMessage] = useState('')
+  const [toastType, setToastType] = useState<'success' | 'error'>('success')
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<number, boolean>>({})
 
   const loadUsers = async () => {
     setLoadingUsers(true)
@@ -43,8 +44,7 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
         setResetEmail(data[0].email)
       }
     } catch (err) {
-      setMessage('Could not load users. Please refresh and try again.')
-      setMessageType('error')
+      showToast('Could not load users. Please refresh and try again.', 'error')
     } finally {
       setLoadingUsers(false)
     }
@@ -54,17 +54,17 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
     loadUsers()
   }, [])
 
-  const showMessage = (text: string, type: 'success' | 'error' = 'success') => {
-    setMessage(text)
-    setMessageType(type)
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(text)
+    setToastType(type)
+    setTimeout(() => setToastMessage(''), 3000)
   }
 
   const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    showMessage('', 'success')
     try {
       await createUser({ username, email, full_name: fullName, role, password })
-      showMessage('User created successfully.', 'success')
+      showToast('User created successfully.', 'success')
       setEmail('')
       setUsername('')
       setFullName('')
@@ -72,7 +72,7 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
       await loadUsers()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not create user. Check the values and try again.'
-      showMessage(message, 'error')
+      showToast(message, 'error')
     }
   }
 
@@ -84,7 +84,6 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
       full_name: user.full_name || '',
       role: user.role,
     })
-    setMessage('')
   }
 
   const handleCancelEdit = () => {
@@ -93,30 +92,29 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
   }
 
   const handleSaveUser = async (userId: number) => {
-    showMessage('', 'success')
     try {
       await updateUser(userId, editUser)
-      showMessage('User updated successfully.', 'success')
+      showToast('User updated successfully.', 'success')
       setEditingUserId(null)
       setEditUser({ username: '', email: '', full_name: '', role: 'parent' })
       await loadUsers()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not update user. Try again.'
-      showMessage(message, 'error')
+      showToast(message, 'error')
     }
   }
 
   const handleDeleteUser = async (userId: number) => {
     try {
       await deleteUser(userId)
-      showMessage('User deleted successfully.', 'success')
-      setUsers(users.filter((user) => user.id !== userId))
+      showToast('User deleted successfully.', 'success')
+      setUsers(users.filter((u) => u.id !== userId))
       if (editingUserId === userId) {
         handleCancelEdit()
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not delete user. Try again.'
-      showMessage(message, 'error')
+      showToast(message, 'error')
     }
   }
 
@@ -136,20 +134,23 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
 
   const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    showMessage('', 'success')
     try {
       await resetPassword(resetEmail, resetPasswordValue)
-      showMessage('Password updated successfully.', 'success')
+      showToast('Password updated successfully.', 'success')
       setResetEmail('')
       setResetPasswordValue('')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not reset password. Verify the email address.'
-      showMessage(message, 'error')
+      showToast(message, 'error')
     }
   }
 
+  const togglePasswordVisibility = (userId: number) => {
+    setVisiblePasswords((prev) => ({ ...prev, [userId]: !prev[userId] }))
+  }
+
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
+    <div className="relative mx-auto max-w-5xl px-4 py-8">
       <Navbar
         title={`Admin Console`}
         actions={
@@ -158,6 +159,15 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
           </button>
         }
       />
+
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-2xl px-6 py-3 text-sm font-semibold text-white shadow-lg transition-opacity">
+          <div className={toastType === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}>
+            {toastMessage}
+          </div>
+        </div>
+      )}
+
       <section className="grid gap-6 lg:grid-cols-2">
         <article className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200">
           <h2 className="text-2xl font-semibold text-slate-900">Create account</h2>
@@ -250,6 +260,7 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">Full name</th>
                 <th className="px-4 py-3 font-medium">Role</th>
+                <th className="px-4 py-3 font-medium">Password</th>
                 <th className="px-4 py-3 font-medium">Created</th>
                 <th className="px-4 py-3 font-medium">Actions</th>
               </tr>
@@ -305,6 +316,30 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
                       userItem.role
                     )}
                   </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs">
+                        {visiblePasswords[userItem.id] ? '••••••••' : '••••••••'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => togglePasswordVisibility(userItem.id)}
+                        className="text-slate-400 hover:text-slate-600"
+                        title={visiblePasswords[userItem.id] ? 'Hide password' : 'Show password'}
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          {visiblePasswords[userItem.id] ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                          ) : (
+                            <>
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </>
+                          )}
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
                   <td className="px-4 py-3">{new Date(userItem.created_at).toLocaleString()}</td>
                   <td className="px-4 py-3 space-x-2">
                     {editingUserId === userItem.id ? (
@@ -346,16 +381,6 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
           </table>
         </div>
       </section>
-
-      {message && (
-        <p
-          className={`mt-6 rounded-3xl p-4 ${
-            messageType === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-          }`}
-        >
-          {message}
-        </p>
-      )}
 
       {userToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
