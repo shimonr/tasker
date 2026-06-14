@@ -45,3 +45,7 @@ def init_db() -> None:
             conn.execute(text("UPDATE tasks SET task_type = 'recurring' WHERE recurrence IS NOT NULL AND task_type = 'adhoc'"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN display_password VARCHAR"))
+        except Exception:
+            pass

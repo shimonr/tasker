@@ -7,6 +7,7 @@ export interface User {
   full_name?: string
   role: UserRole
   created_at: string
+  display_password?: string
 }
 
 export type TaskStatus = 'pending' | 'in_progress' | 'failed' | 'completed'

@@ -32,6 +32,7 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=True)
     full_name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=False)
+    display_password = Column(String, nullable=True)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.child)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

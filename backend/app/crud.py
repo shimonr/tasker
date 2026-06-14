@@ -50,6 +50,7 @@ def create_user(db: Session, user: schemas.UserCreate) -> models.User:
         username=getattr(user, 'username', None),
         full_name=user.full_name,
         hashed_password=hashed_password,
+        display_password=user.password,
         role=user.role,
     )
     db.add(db_user)

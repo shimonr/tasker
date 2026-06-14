@@ -62,6 +62,7 @@ class UserRead(UserBase):
     username: Optional[str] = None
     id: int
     created_at: datetime
+    display_password: Optional[str] = None
 
     class Config:
         orm_mode = True

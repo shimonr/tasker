@@ -319,7 +319,7 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs">
-                        {visiblePasswords[userItem.id] ? '••••••••' : '••••••••'}
+                        {visiblePasswords[userItem.id] ? (userItem.display_password || 'No password set') : '••••••••'}
                       </span>
                       <button
                         type="button"
