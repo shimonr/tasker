@@ -1,8 +1,23 @@
+import calendar
+import secrets
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Iterable, List, Optional
+
 from sqlalchemy import func
-from sqlalchemy.orm import Session
-from . import models, schemas, auth
+from sqlalchemy.orm import Session, selectinload
+
+from . import auth, models, schemas
+from .timeutil import as_utc, utcnow
+
+PRIORITY_STARS = {"Low": 1, "Medium": 2, "High": 3}
+MAX_OCCURRENCES = 100
+
+
+# ---------------------------------------------------------------- users
+
+
+def display_name(user: models.User) -> str:
+    return user.full_name or user.username or user.email
 
 
 def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
@@ -10,8 +25,6 @@ def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
 
 
 def get_user_by_username(db: Session, username: str) -> Optional[models.User]:
-    if username is None:
-        return None
     return db.query(models.User).filter(func.lower(models.User.username) == username.lower()).first()
 
 
@@ -19,39 +32,43 @@ def get_user_by_identifier(db: Session, identifier: str) -> Optional[models.User
     identifier_lower = identifier.lower()
     return (
         db.query(models.User)
-        .filter(
-            (func.lower(models.User.email) == identifier_lower) | (func.lower(models.User.username) == identifier_lower)
-        )
+        .filter((func.lower(models.User.email) == identifier_lower) | (func.lower(models.User.username) == identifier_lower))
         .first()
     )
 
 
 def get_user(db: Session, user_id: int) -> Optional[models.User]:
-    return db.query(models.User).filter(models.User.id == user_id).first()
+    return db.get(models.User, user_id)
 
 
-def get_users(db: Session) -> list[models.User]:
-    return db.query(models.User).order_by(models.User.created_at.desc()).all()
+def get_users(db: Session) -> List[models.User]:
+    return db.query(models.User).order_by(models.User.created_at.desc(), models.User.id.desc()).all()
 
 
-def update_user(db: Session, user: models.User, user_update: schemas.UserUpdate) -> models.User:
-    for field, value in user_update.dict(exclude_unset=True).items():
-        setattr(user, field, value)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+def get_children(db: Session) -> List[models.User]:
+    return (
+        db.query(models.User)
+        .filter(models.User.role == models.UserRole.child)
+        .order_by(models.User.created_at.desc(), models.User.id.desc())
+        .all()
+    )
+
+
+def find_identity_conflict(db: Session, email: Optional[str], username: Optional[str], exclude_id: Optional[int] = None) -> bool:
+    for user in (email and get_user_by_email(db, email), username and get_user_by_username(db, username)):
+        if user and user.id != exclude_id:
+            return True
+    return False
 
 
 def create_user(db: Session, user: schemas.UserCreate) -> models.User:
-    hashed_password = auth.get_password_hash(user.password)
     db_user = models.User(
         email=user.email,
-        username=getattr(user, 'username', None),
+        username=user.username,
         full_name=user.full_name,
-        hashed_password=hashed_password,
-        display_password=user.password,
+        hashed_password=auth.get_password_hash(user.password),
         role=user.role,
+        token_version=0,
     )
     db.add(db_user)
     db.commit()
@@ -59,135 +76,205 @@ def create_user(db: Session, user: schemas.UserCreate) -> models.User:
     return db_user
 
 
-def authenticate_user(db: Session, email: str, password: str) -> Optional[models.User]:
-    user = get_user_by_identifier(db, email)
-    if not user:
-        return None
-    if not auth.verify_password(password, user.hashed_password):
-        return None
+def update_user(db: Session, user: models.User, user_update: schemas.UserUpdate) -> models.User:
+    for field, value in user_update.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
     return user
 
 
-def create_status_log(db: Session, task: models.Task, user_id: int, new_status: models.TaskStatus):
-    log = models.TaskStatusLog(
-        task_id=task.id,
-        changed_by=user_id,
-        previous_status=task.status,
-        new_status=new_status,
-    )
-    db.add(log)
-    return log
+def set_password(db: Session, user: models.User, new_password: str) -> None:
+    user.hashed_password = auth.get_password_hash(new_password)
+    user.token_version = (user.token_version or 0) + 1
+    db.commit()
 
 
-def create_task(db: Session, task_data: schemas.TaskCreate, creator_id: int) -> models.Task:
+def delete_user(db: Session, user: models.User) -> None:
+    # Tasks they created, their assignments and star history cascade through the ORM.
+    db.query(models.TaskStatusLog).filter(models.TaskStatusLog.changed_by == user.id).delete()
+    db.query(models.TaskOccurrence).filter(models.TaskOccurrence.completed_by == user.id).update({"completed_by": None})
+    db.delete(user)
+    db.commit()
+
+
+def authenticate_user(db: Session, identifier: str, password: str) -> Optional[models.User]:
+    user = get_user_by_identifier(db, identifier)
+    if user and auth.verify_password(password, user.hashed_password):
+        return user
+    return None
+
+
+def get_or_create_app_secret(db: Session, name: str) -> str:
+    secret = db.get(models.AppSecret, name)
+    if secret is None:
+        secret = models.AppSecret(name=name, value=secrets.token_urlsafe(48))
+        db.add(secret)
+        db.commit()
+    return secret.value
+
+
+# ---------------------------------------------------------------- tasks
+
+
+def all_children(db: Session, child_ids: Iterable[int]) -> bool:
+    ids = set(child_ids)
+    found = db.query(models.User).filter(models.User.id.in_(ids), models.User.role == models.UserRole.child).count()
+    return found == len(ids)
+
+
+def task_shape_error(task_type: str, recurrence: Optional[str], assignee_ids: List[int]) -> Optional[str]:
+    if task_type == models.TaskType.rotating and len(set(assignee_ids)) < 2:
+        return "Rotating tasks require at least 2 assignees"
+    if task_type == models.TaskType.recurring and not recurrence:
+        return "Recurring tasks require a recurrence"
+    return None
+
+
+def _log(db: Session, task: models.Task, user_id: int, previous: models.TaskStatus, new: models.TaskStatus) -> None:
+    db.add(models.TaskStatusLog(task_id=task.id, changed_by=user_id, previous_status=previous, new_status=new))
+
+
+def create_task(db: Session, data: schemas.TaskCreate, creator_id: int) -> models.Task:
+    recurring = data.task_type == models.TaskType.recurring
     task = models.Task(
-        title=task_data.title,
-        description=task_data.description,
-        due_date=task_data.due_date,
-        start_date=task_data.start_date,
-        priority=task_data.priority,
-        recurrence=task_data.recurrence,
-        task_type=task_data.task_type or models.TaskType.adhoc,
+        title=data.title,
+        description=data.description,
+        due_date=data.due_date,
+        # Default recurring tasks to the start of today so each period's chore is available all day.
+        start_date=data.start_date or (utcnow().replace(hour=0, minute=0, second=0, microsecond=0) if recurring else None),
+        priority=data.priority,
+        recurrence=data.recurrence if recurring else None,
+        task_type=data.task_type,
+        status=models.TaskStatus.pending,
         created_by=creator_id,
     )
     db.add(task)
+    db.flush()
+    assign_task(task, data.assignee_ids)
+    _log(db, task, creator_id, task.status, task.status)
+    sync_occurrences(task)
     db.commit()
     db.refresh(task)
-    assign_task(db, task.id, task_data.assignee_ids or [], task.task_type)
-    if task.task_type == models.TaskType.recurring and task.recurrence:
-        generate_occurrences(db, task)
-    log = create_status_log(db, task, creator_id, task.status)
-    db.add(log)
-    db.commit()
     return task
 
 
-def generate_occurrences(db: Session, task: models.Task) -> None:
-    start = task.start_date or datetime.utcnow()
-    today = datetime.utcnow()
-    current = start
-    count = 0
-    max_occurrences = 52
-
-    while current <= today and count < max_occurrences:
-        occurrence = models.TaskOccurrence(
-            task_id=task.id,
-            occurrence_date=current,
-            status=models.TaskStatus.pending,
+def assign_task(task: models.Task, child_ids: List[int]) -> List[int]:
+    """Set the task's assignees, keeping progress for children who stay. Returns newly added child ids."""
+    child_ids = list(dict.fromkeys(child_ids))
+    rotating = task.task_type == models.TaskType.rotating
+    existing = {a.child_id: a for a in task.assignments}
+    for child_id, assignment in existing.items():
+        if child_id not in child_ids:
+            task.assignments.remove(assignment)
+    added = []
+    for order, child_id in enumerate(child_ids):
+        assignment = existing.get(child_id)
+        if assignment is None:
+            assignment = models.TaskAssignment(child_id=child_id, completed=False, is_active=False)
+            task.assignments.append(assignment)
+            added.append(child_id)
+        assignment.rotation_order = order if rotating else None
+    ordered = sorted(task.assignments, key=lambda a: child_ids.index(a.child_id))
+    active = None
+    if rotating:
+        active = next((a for a in ordered if a.is_active and not a.completed), None) or next(
+            (a for a in ordered if not a.completed), None
         )
-        db.add(occurrence)
-        count += 1
-        if task.recurrence == 'daily':
-            current += timedelta(days=1)
-        elif task.recurrence == 'weekly':
-            current += timedelta(weeks=1)
-        elif task.recurrence == 'monthly':
-            month = current.month + 1
-            year = current.year
-            if month > 12:
-                month = 1
-                year += 1
-            current = current.replace(year=year, month=month)
-        elif task.recurrence == 'yearly':
-            current = current.replace(year=current.year + 1)
-
-    db.commit()
+    for assignment in ordered:
+        assignment.is_active = (assignment is active) if rotating else True
+    return added
 
 
-def assign_task(db: Session, task_id: int, child_ids: List[int], task_type: models.TaskType = models.TaskType.adhoc) -> None:
-    db.query(models.TaskAssignment).filter(models.TaskAssignment.task_id == task_id).delete()
-    for idx, child_id in enumerate(child_ids):
-        assignment = models.TaskAssignment(
-            task_id=task_id,
-            child_id=child_id,
-            rotation_order=idx if task_type == models.TaskType.rotating else None,
-            is_active=(idx == 0) if task_type == models.TaskType.rotating else True,
-        )
-        db.add(assignment)
-    db.commit()
+def _schedule(start: datetime, recurrence: str, step: int) -> datetime:
+    if recurrence == "daily":
+        return start + timedelta(days=step)
+    if recurrence == "weekly":
+        return start + timedelta(weeks=step)
+    months = step if recurrence == "monthly" else 12 * step
+    index = start.month - 1 + months
+    year, month = start.year + index // 12, index % 12 + 1
+    # Clamp to the month length so the 31st (or Feb 29th) keeps working.
+    return start.replace(year=year, month=month, day=min(start.day, calendar.monthrange(year, month)[1]))
+
+
+def recurrence_dates(start: datetime, recurrence: str, until: datetime) -> List[datetime]:
+    dates = []
+    current, step = start, 0
+    while current <= until:
+        dates.append(current)
+        step += 1
+        current = _schedule(start, recurrence, step)
+    return dates[-MAX_OCCURRENCES:]
+
+
+def sync_occurrences(task: models.Task) -> bool:
+    """Make sure a recurring task has one occurrence per scheduled date up to now. Returns True if changed."""
+    wanted = set()
+    if task.task_type == models.TaskType.recurring and task.recurrence:
+        start = as_utc(task.start_date or task.created_at)
+        wanted = set(recurrence_dates(start, task.recurrence, utcnow()))
+    changed = False
+    for occurrence in list(task.occurrences):
+        when = as_utc(occurrence.occurrence_date)
+        if when in wanted:
+            wanted.discard(when)
+        elif occurrence.status != models.TaskStatus.completed:
+            task.occurrences.remove(occurrence)
+            changed = True
+    for when in sorted(wanted):
+        task.occurrences.append(models.TaskOccurrence(occurrence_date=when, status=models.TaskStatus.pending))
+        changed = True
+    return changed
+
+
+def refresh_tasks(db: Session, tasks: List[models.Task]) -> List[models.Task]:
+    if any([sync_occurrences(task) for task in tasks]):
+        db.commit()
+    return tasks
+
+
+def _task_query(db: Session):
+    return db.query(models.Task).options(selectinload(models.Task.assignments), selectinload(models.Task.occurrences))
 
 
 def get_task(db: Session, task_id: int) -> Optional[models.Task]:
-    return db.query(models.Task).filter(models.Task.id == task_id).first()
+    return db.get(models.Task, task_id)
 
 
 def get_tasks_for_parent(db: Session, parent_id: int, status: Optional[str] = None, child_id: Optional[int] = None) -> List[models.Task]:
-    query = db.query(models.Task).filter(models.Task.created_by == parent_id)
-    if status:
-        try:
-            status_enum = models.TaskStatus(status)
-            query = query.filter(models.Task.status == status_enum)
-        except ValueError:
-            pass
+    query = _task_query(db).filter(models.Task.created_by == parent_id)
+    if status in models.TaskStatus.__members__:
+        query = query.filter(models.Task.status == models.TaskStatus(status))
     if child_id:
         query = query.join(models.Task.assignments).filter(models.TaskAssignment.child_id == child_id)
-    return query.order_by(models.Task.created_at.desc()).all()
+    return query.order_by(models.Task.created_at.desc(), models.Task.id.desc()).all()
 
 
-def get_tasks_for_child(db: Session, child_id: int) -> List[models.TaskAssignment]:
+def get_tasks_for_child(db: Session, child_id: int) -> List[models.Task]:
     return (
-        db.query(models.TaskAssignment)
-        .join(models.Task)
+        _task_query(db)
+        .join(models.Task.assignments)
         .filter(models.TaskAssignment.child_id == child_id)
-        .filter(
-            (models.Task.task_type != models.TaskType.rotating)
-            | ((models.Task.task_type == models.TaskType.rotating) & (models.TaskAssignment.is_active == True))
-        )
-        .order_by(models.TaskAssignment.assigned_at.desc())
+        .filter((models.Task.task_type != models.TaskType.rotating) | (models.TaskAssignment.is_active == True))  # noqa: E712
+        .order_by(models.Task.created_at.desc(), models.Task.id.desc())
         .all()
     )
 
 
-def update_task(db: Session, task: models.Task, task_update: schemas.TaskUpdate) -> models.Task:
-    for field, value in task_update.dict(exclude_unset=True).items():
-        if field == "assignee_ids":
-            assign_task(db, task.id, value, task.task_type)
-            continue
+def update_task(db: Session, task: models.Task, task_update: schemas.TaskUpdate) -> List[int]:
+    """Apply an update and return child ids that were newly assigned."""
+    changes = task_update.model_dump(exclude_unset=True)
+    assignee_ids = changes.pop("assignee_ids", None)
+    for field, value in changes.items():
         setattr(task, field, value)
-    db.add(task)
+    if task.task_type != models.TaskType.recurring:
+        task.recurrence = None
+    added = assign_task(task, assignee_ids if assignee_ids is not None else [a.child_id for a in task.assignments])
+    sync_occurrences(task)
     db.commit()
     db.refresh(task)
-    return task
+    return added
 
 
 def delete_task(db: Session, task: models.Task) -> None:
@@ -195,202 +282,156 @@ def delete_task(db: Session, task: models.Task) -> None:
     db.commit()
 
 
-def advance_rotating_task(db: Session, task_id: int, user_id: int) -> models.Task:
-    task = get_task(db, task_id)
-    if not task or task.task_type != models.TaskType.rotating:
-        return None
+def _rotation(task: models.Task) -> List[models.TaskAssignment]:
+    return sorted(task.assignments, key=lambda a: a.rotation_order or 0)
 
-    previous_status = task.status
 
-    current_active = (
-        db.query(models.TaskAssignment)
-        .filter(
-            models.TaskAssignment.task_id == task_id,
-            models.TaskAssignment.is_active == True,
-        )
-        .first()
-    )
+def _next_in_rotation(ordered: List[models.TaskAssignment], current: Optional[models.TaskAssignment]):
+    start = ordered.index(current) + 1 if current in ordered else 0
+    return next((a for a in ordered[start:] + ordered[:start] if a is not current and not a.completed), None)
 
-    if current_active:
-        current_active.is_active = False
-        db.add(current_active)
 
-    next_assignment = (
-        db.query(models.TaskAssignment)
-        .filter(
-            models.TaskAssignment.task_id == task_id,
-            models.TaskAssignment.is_active == False,
-            models.TaskAssignment.completed == False,
-        )
-        .order_by(models.TaskAssignment.rotation_order)
-        .first()
-    )
-
-    if not next_assignment:
-        next_assignment = (
-            db.query(models.TaskAssignment)
-            .filter(
-                models.TaskAssignment.task_id == task_id,
-                models.TaskAssignment.is_active == False,
-            )
-            .order_by(models.TaskAssignment.rotation_order)
-            .first()
-        )
-
-    if next_assignment:
-        next_assignment.is_active = True
-        db.add(next_assignment)
-        task.status = models.TaskStatus.pending
-        db.add(task)
-
-    log = models.TaskStatusLog(
-        task_id=task_id,
-        changed_by=user_id,
-        previous_status=previous_status,
-        new_status=task.status,
-    )
-    db.add(log)
+def advance_rotating_task(db: Session, task: models.Task, user_id: int) -> Optional[int]:
+    """Pass a rotating task to the next child in order. Returns the newly active child id."""
+    ordered = _rotation(task)
+    current = next((a for a in ordered if a.is_active), None)
+    if current is None:
+        finished = [a for a in ordered if a.completed_at]
+        current = max(finished, key=lambda a: as_utc(a.completed_at)) if finished else None
+    following = _next_in_rotation(ordered, current)
+    if following is None:
+        # Everyone has had their turn: start a new round.
+        for assignment in ordered:
+            assignment.completed = False
+            assignment.completed_at = None
+        following = _next_in_rotation(ordered, current)
+    for assignment in ordered:
+        assignment.is_active = assignment is following
+    previous = task.status
+    task.status = models.TaskStatus.pending
+    _log(db, task, user_id, previous, task.status)
     db.commit()
     db.refresh(task)
-    return task
+    return following.child_id
 
 
-def delete_user(db: Session, user: models.User) -> None:
-    db.delete(user)
-    db.commit()
-
-
-def get_children(db: Session) -> list[models.User]:
-    return db.query(models.User).filter(models.User.role == models.UserRole.child).order_by(models.User.created_at.desc()).all()
-
-
-def mark_assignment_complete(db: Session, assignment: models.TaskAssignment, user_id: int) -> models.TaskAssignment:
-    assignment.completed = True
-    assignment.completed_at = datetime.utcnow()
-    assignment.is_active = False
-    previous_status = assignment.task.status
-
-    if assignment.task.task_type == models.TaskType.rotating:
-        next_assignment = (
-            db.query(models.TaskAssignment)
-            .filter(
-                models.TaskAssignment.task_id == assignment.task.id,
-                models.TaskAssignment.id != assignment.id,
-                models.TaskAssignment.completed == False,
-            )
-            .order_by(models.TaskAssignment.rotation_order)
-            .first()
+def _award(db: Session, child_id: int, task: models.Task) -> None:
+    db.add(
+        models.CompletionEvent(
+            child_id=child_id,
+            task_id=task.id,
+            task_title=task.title,
+            stars=PRIORITY_STARS.get(task.priority, 1),
+            completed_at=utcnow(),
         )
-        if next_assignment:
-            assignment.task.status = models.TaskStatus.pending
-            next_assignment.is_active = True
-            db.add(next_assignment)
-        else:
-            assignment.task.status = models.TaskStatus.completed
-    else:
-        assignment.task.status = models.TaskStatus.completed
-
-    db.add(assignment)
-    db.add(assignment.task)
-    log = models.TaskStatusLog(
-        task_id=assignment.task.id,
-        changed_by=user_id,
-        previous_status=previous_status,
-        new_status=assignment.task.status,
     )
-    db.add(log)
+
+
+def complete_assignment(db: Session, assignment: models.TaskAssignment) -> Optional[int]:
+    """Mark a child's assignment done and award stars. For rotating tasks returns the next child's id."""
+    task = assignment.task
+    previous = task.status
+    assignment.completed = True
+    assignment.completed_at = utcnow()
+    next_child_id = None
+    if task.task_type == models.TaskType.rotating:
+        assignment.is_active = False
+        following = _next_in_rotation(_rotation(task), assignment)
+        if following:
+            following.is_active = True
+            next_child_id = following.child_id
+            task.status = models.TaskStatus.pending
+        else:
+            task.status = models.TaskStatus.completed
+    elif all(a.completed for a in task.assignments):
+        task.status = models.TaskStatus.completed
+    else:
+        task.status = models.TaskStatus.in_progress
+    _award(db, assignment.child_id, task)
+    _log(db, task, assignment.child_id, previous, task.status)
     db.commit()
-    db.refresh(assignment)
-    return assignment
+    return next_child_id
 
 
 def get_task_status_logs(db: Session, task_id: int) -> List[models.TaskStatusLog]:
     return (
         db.query(models.TaskStatusLog)
         .filter(models.TaskStatusLog.task_id == task_id)
-        .order_by(models.TaskStatusLog.changed_at.desc())
+        .order_by(models.TaskStatusLog.changed_at.desc(), models.TaskStatusLog.id.desc())
         .all()
     )
 
 
-def update_task_status(db: Session, task: models.Task, user_id: int, new_status: models.TaskStatus) -> models.Task:
-    previous_status = task.status
-    if previous_status == new_status:
-        return task
-    task.status = new_status
-    db.add(task)
-    log = models.TaskStatusLog(
-        task_id=task.id,
-        changed_by=user_id,
-        previous_status=previous_status,
-        new_status=new_status,
-    )
-    db.add(log)
-    db.commit()
-    db.refresh(task)
-    return task
-
-
-def get_completion_stats(db: Session, parent_id: int) -> dict:
-    tasks = get_tasks_for_parent(db, parent_id)
-    completed = sum(1 for task in tasks if task.status == models.TaskStatus.completed)
-    in_progress = sum(1 for task in tasks if task.status == models.TaskStatus.in_progress)
-    failed = sum(1 for task in tasks if task.status == models.TaskStatus.failed)
-    return {
-        "total_tasks": len(tasks),
-        "completed_tasks": completed,
-        "pending_tasks": len(tasks) - completed - in_progress - failed,
-        "in_progress_tasks": in_progress,
-        "failed_tasks": failed,
-    }
-
-
-def get_occurrences_for_task(db: Session, task_id: int) -> List[models.TaskOccurrence]:
-    return (
-        db.query(models.TaskOccurrence)
-        .filter(models.TaskOccurrence.task_id == task_id)
-        .order_by(models.TaskOccurrence.occurrence_date.desc())
-        .all()
-    )
+def update_task_status(db: Session, task: models.Task, user_id: int, new_status: models.TaskStatus) -> None:
+    if task.status != new_status:
+        _log(db, task, user_id, task.status, new_status)
+        task.status = new_status
+        db.commit()
 
 
 def get_occurrence(db: Session, occurrence_id: int) -> Optional[models.TaskOccurrence]:
-    return db.query(models.TaskOccurrence).filter(models.TaskOccurrence.id == occurrence_id).first()
+    return db.get(models.TaskOccurrence, occurrence_id)
 
 
-def update_occurrence_status(db: Session, occurrence: models.TaskOccurrence, user_id: int, new_status: models.TaskStatus) -> models.TaskOccurrence:
-    previous_status = occurrence.status
-    if previous_status == new_status:
-        return occurrence
-    occurrence.status = new_status
-    if new_status == models.TaskStatus.completed:
-        occurrence.completed_at = datetime.utcnow()
-    db.add(occurrence)
-    log = models.TaskStatusLog(
-        task_id=occurrence.task_id,
-        changed_by=user_id,
-        previous_status=previous_status,
-        new_status=new_status,
-    )
-    db.add(log)
-    db.commit()
+def set_occurrence_status(db: Session, occurrence: models.TaskOccurrence, user_id: int, new_status: models.TaskStatus) -> models.TaskOccurrence:
+    previous = occurrence.status
+    if previous != new_status:
+        occurrence.status = new_status
+        done = new_status == models.TaskStatus.completed
+        occurrence.completed_at = utcnow() if done else None
+        occurrence.completed_by = user_id if done else None
+        _log(db, occurrence.task, user_id, previous, new_status)
+        db.commit()
     db.refresh(occurrence)
     return occurrence
 
 
-def complete_occurrence(db: Session, occurrence: models.TaskOccurrence, user_id: int) -> models.TaskOccurrence:
+def complete_occurrence(db: Session, occurrence: models.TaskOccurrence, child_id: int) -> bool:
+    """A child completes an occurrence. Returns False if it was already completed."""
     if occurrence.status == models.TaskStatus.completed:
-        return occurrence
-    occurrence.status = models.TaskStatus.completed
-    occurrence.completed_at = datetime.utcnow()
-    db.add(occurrence)
-    log = models.TaskStatusLog(
-        task_id=occurrence.task_id,
-        changed_by=user_id,
-        previous_status=occurrence.status,
-        new_status=models.TaskStatus.completed,
-    )
-    db.add(log)
-    db.commit()
-    db.refresh(occurrence)
-    return occurrence
+        return False
+    _award(db, child_id, occurrence.task)
+    set_occurrence_status(db, occurrence, child_id, models.TaskStatus.completed)
+    return True
+
+
+# ---------------------------------------------------------------- stats
+
+
+def get_child_stats(db: Session, child_id: int) -> dict:
+    events = db.query(models.CompletionEvent).filter(models.CompletionEvent.child_id == child_id).all()
+    days = {as_utc(event.completed_at).date() for event in events}
+    day = utcnow().date()
+    if day not in days:
+        day -= timedelta(days=1)  # today's streak is still alive until midnight
+    streak = 0
+    while day in days:
+        streak += 1
+        day -= timedelta(days=1)
+    return {"stars": sum(event.stars for event in events), "completed_count": len(events), "streak_days": streak}
+
+
+def current_status(task: models.Task) -> models.TaskStatus:
+    """A recurring task's status is that of its current (newest) occurrence."""
+    if task.task_type == models.TaskType.recurring and task.occurrences:
+        return task.occurrences[0].status
+    return task.status
+
+
+def get_completion_stats(db: Session, parent_id: int) -> dict:
+    tasks = refresh_tasks(db, get_tasks_for_parent(db, parent_id))
+    statuses = [current_status(task) for task in tasks]
+    counts = {status: statuses.count(status) for status in models.TaskStatus}
+    leaderboard = [
+        {"child_id": child.id, "name": display_name(child), **get_child_stats(db, child.id)}
+        for child in get_children(db)
+    ]
+    leaderboard.sort(key=lambda entry: entry["stars"], reverse=True)
+    return {
+        "total_tasks": len(tasks),
+        "completed_tasks": counts[models.TaskStatus.completed],
+        "pending_tasks": counts[models.TaskStatus.pending],
+        "in_progress_tasks": counts[models.TaskStatus.in_progress],
+        "failed_tasks": counts[models.TaskStatus.failed],
+        "children": leaderboard,
+    }

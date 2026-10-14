@@ -1,126 +1,97 @@
-# Family Task Manager
+# Family Task Adventure 🎈
 
-A lightweight family task manager with a React + TypeScript frontend and a FastAPI backend.
+A cheerful family chore app: parents create tasks, kids complete them and collect stars ⭐, admins manage the family.
+React + TypeScript (Vite, Tailwind) frontend and a FastAPI + SQLAlchemy backend.
 
-## Version
+- Release: **0.4**
 
-- Release state: **0.3**
-- GitHub release tag: `v0.3`
+## Features
 
-## Architecture
+- **Kids** see their missions grouped by kind, tap “I did it!” (with confetti 🎉), earn stars by priority
+  (🌱 1, 🌟 2, 🔥 3), and keep a daily streak 🔥. Finished tasks sink to the bottom.
+- **Parents** create one-time, repeating (daily/weekly/monthly/yearly) and taking-turns tasks, edit them,
+  change statuses, see a status log, pass rotating chores to the next kid and follow a star leaderboard.
+- **Admins** add, edit and remove family members and reset passwords.
+- **Email via Brevo**: welcome emails, self-service “Forgot password” links, “new task”/“your turn” emails
+  for kids and “task finished” emails for parents.
+- **Mobile first**: responsive layouts, big touch targets, bottom-sheet dialogs, installable as an app (PWA manifest).
+- **Security**: hashed passwords only (no plaintext copies), sessions revoked on password change, login and
+  reset rate limits, strict security headers, role and ownership checks on every endpoint.
 
-- `backend/` — FastAPI REST API, SQLAlchemy models, SQLite/PostgreSQL persistence
-- `frontend/` — Vite React TypeScript app with role-aware UI flows
-- `docker-compose.yml` — containerized backend + frontend for local development
+## Project layout
 
-## Key features
+- `backend/` – FastAPI API (`app/`), tests (`tests/`, 100% line + branch coverage enforced)
+- `frontend/` – Vite React app (`src/`), tests next to the code (100% coverage enforced)
+- `deploy/oracle/` – production (prod + qa) on an Oracle Cloud Always Free VM → [deploy/oracle/README.md](deploy/oracle/README.md)
+- `railway.json`, `frontend/vercel.json` – the Railway + Vercel deployment, kept as a warm failover
+- `.github/workflows/` – CI/CD and the nightly failover database sync
 
-- Admin user management and password reset
-- Parent task creation with child assignment and recurrence options
-- Rotating tasks with per-child active assignment
-- Per-occurrence tracking for recurring tasks
-- Task editing for all task types
-- Child task view with completion actions
-- JWT authentication and role-based access control
+## Local development
 
-## Setup
+Backend (Python 3.12):
 
-### Backend
-
-1. Open a terminal in `backend`
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the API:
-   ```bash
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-### Frontend
-
-1. Open a terminal in `frontend`
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the app:
-   ```bash
-   npm run dev -- --host 0.0.0.0 --port 5173
-   ```
-
-### Docker
-
-From the repository root:
-
-```bash
-docker compose up --build
-```
-
-## Testing
-
-Backend tests:
 ```bash
 cd backend
-pytest
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+ADMIN_PASSWORD=choose-a-password uvicorn app.main:app --reload --port 8000
 ```
 
-Frontend tests:
+Frontend (Node 20+), in another terminal. Vite proxies `/api` to `http://localhost:8000`:
+
 ```bash
 cd frontend
-npm test
+npm install
+npm run dev
 ```
+
+Open http://localhost:5173 and sign in as `admin` with the password you chose. If you don't set
+`ADMIN_PASSWORD`, a random one is generated and printed in the backend log on first start.
+
+Production-like stack with Docker: `docker compose up --build`, then open http://localhost:8080
+(admin password: `change-me-please`, or set `ADMIN_PASSWORD`).
+
+## Tests
+
+```bash
+cd backend && pytest            # SQLite, fails below 100% coverage
+TEST_DATABASE_URL=postgresql://user:pass@localhost/tasker_test pytest --no-cov   # against PostgreSQL
+cd frontend && npm test         # Vitest, fails below 100% coverage
+```
+
+## Configuration (backend environment variables)
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | SQLAlchemy URL. Default `sqlite:///./tasker.db`; `postgres://` URLs are accepted. |
+| `TASKER_SECRET_KEY` | JWT signing key (use 32+ random characters). If unset, a random key is generated and stored in the database. |
+| `ADMIN_EMAIL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Bootstrap admin. `ADMIN_PASSWORD` also works as a break-glass reset. |
+| `FRONTEND_ORIGIN` | Allowed CORS origin(s), comma separated (only needed when the frontend is on another domain). |
+| `APP_BASE_URL` | Public URL of the frontend, used in email links. |
+| `APP_ENV` | Shown by `/api/health` (`prod`, `qa`, `failover`, …). |
+| `BREVO_API_KEY` | Brevo API key. Without it emails are logged and skipped. |
+| `EMAIL_SENDER_ADDRESS`, `EMAIL_SENDER_NAME` | Sender; the address must be a verified sender in Brevo. |
+| `EMAIL_OVERRIDE_RECIPIENT` | Send every email to this address instead (use on QA). |
+
+Frontend build variable: `VITE_API_BASE_URL` – API base URL when the API is on another domain (Vercel → Railway).
+Defaults to same-origin `/api`.
 
 ## Deployment
 
-### Frontend (Vercel)
+- **Primary – Oracle Cloud (prod + qa):** pushes to `master` deploy prod, pushes to `qa` deploy QA, after all
+  tests pass. One-time setup: [deploy/oracle/README.md](deploy/oracle/README.md).
+- **Failover – Railway (API) + Vercel (frontend):** unchanged; they keep auto-deploying `master`.
+  The “Failover database sync” workflow copies prod data to Railway nightly, so it can take over at any time.
 
-1. Push to GitHub
-2. Go to [vercel.com](https://vercel.com) and import the repository
-3. Set the root directory to `frontend`
-4. Add environment variable:
-   - `VITE_API_BASE_URL` = `https://your-app.up.railway.app/api`
-5. Deploy
+## API overview
 
-### Backend (Railway)
+All endpoints are under `/api`.
 
-1. Go to [railway.app](https://railway.app) and import the repository
-2. Add a PostgreSQL database (free tier)
-3. Set environment variables:
-   - `DATABASE_URL` = (auto-set by Railway PostgreSQL)
-   - `FRONTEND_ORIGIN` = `https://your-app.vercel.app`
-   - `ADMIN_EMAIL` = `admin@example.com`
-   - `ADMIN_PASSWORD` = `your-secure-password`
-4. Deploy
-
-### Default Credentials
-
-- Admin: `admin@example.com` / `admin123`
-- Parent: `shimonro@hotmail.com` / `123`
-- Children: `shimon1974@gmail.com` / `123`, `kellycameronnew@gmail.com` / `123`
-
-## API Endpoints
-
-- `POST /api/token` — login
-- `POST /api/admin/users` — create user (admin)
-- `POST /api/admin/reset-password` — reset password (admin)
-- `POST /api/parent/tasks` — create task (parent)
-- `GET /api/parent/tasks` — list tasks (parent)
-- `PUT /api/parent/tasks/{task_id}` — update task (parent)
-- `DELETE /api/parent/tasks/{task_id}` — delete task (parent)
-- `POST /api/parent/tasks/{task_id}/advance` — advance rotating task (parent)
-- `GET /api/parent/children` — list children (parent)
-- `GET /api/child/tasks` — child task list (child)
-- `POST /api/child/tasks/{task_id}/complete` — complete task (child)
-- `GET /api/tasks/{task_id}/occurrences` — list occurrences
-- `PUT /api/occurrences/{occurrence_id}/status` — update occurrence status
-- `POST /api/occurrences/{occurrence_id}/complete` — complete occurrence
-- `GET /api/me` — current user info
-
-## Environment Variables
-
-- `DATABASE_URL` — database connection string (defaults to SQLite)
-- `FRONTEND_ORIGIN` — allowed CORS origin
-- `ADMIN_EMAIL` — default admin email
-- `ADMIN_PASSWORD` — default admin password
-- `ADMIN_USERNAME` — default admin username
+- `GET /health` · `POST /token` · `GET /me`
+- `POST /auth/forgot-password` · `POST /auth/reset-password`
+- Admin: `GET|POST /admin/users` · `PUT|DELETE /admin/users/{id}` · `POST /admin/reset-password`
+- Parent: `GET /parent/children` · `GET|POST /parent/tasks` · `PUT|DELETE /parent/tasks/{id}` ·
+  `GET /parent/tasks/stats` · `GET /parent/tasks/{id}/log` · `POST /parent/tasks/{id}/advance` ·
+  `PUT /occurrences/{id}/status`
+- Child: `GET /child/tasks` · `GET /child/stats` · `POST /child/tasks/{id}/complete` · `POST /occurrences/{id}/complete`
+- Shared: `POST /tasks/{id}/status` · `GET /tasks/{id}/occurrences`

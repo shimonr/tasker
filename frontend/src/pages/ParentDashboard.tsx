@@ -1,499 +1,219 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { createTask, deleteTask, fetchChildren, fetchParentTasks, fetchStats, fetchTaskLogs, updateTaskStatus, updateTask, advanceTask } from '../api'
-import { Task, User } from '../types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  advanceTask,
+  createTask,
+  deleteTask,
+  fetchChildren,
+  fetchParentTasks,
+  fetchStats,
+  fetchTaskLogs,
+  updateOccurrenceStatus,
+  updateTask,
+  updateTaskStatus,
+} from '../api'
+import type { ParentStats, StatusLog, Task, TaskInput, TaskStatus, User } from '../types'
+import Modal from '../components/Modal'
 import Navbar from '../components/Navbar'
-import TaskCard from '../components/TaskCard'
+import TaskCard, { StatusPill } from '../components/TaskCard'
+import TaskForm from '../components/TaskForm'
+import TaskSections from '../components/TaskSections'
+import { useToast } from '../components/Toast'
+import { kidEmoji, nameFor, userName } from '../lib/tasks'
 
 interface ParentDashboardProps {
   user: User
   onLogout: () => void
 }
 
-const statusLabel: Record<string, string> = {
-  pending: 'Pending',
-  in_progress: 'In progress',
-  failed: 'Failed',
-  completed: 'Completed',
-}
+const TILES: { key: keyof Omit<ParentStats, 'children'>; label: string; emoji: string; className: string }[] = [
+  { key: 'total_tasks', label: 'All tasks', emoji: '📋', className: 'bg-grape-500 border-grape-700 text-white' },
+  { key: 'completed_tasks', label: 'Done', emoji: '🎉', className: 'bg-leaf-400 border-leaf-600 text-white' },
+  { key: 'in_progress_tasks', label: 'Working', emoji: '🚀', className: 'bg-ocean-400 border-ocean-600 text-white' },
+  { key: 'pending_tasks', label: 'To do', emoji: '⏳', className: 'bg-sunny-300 border-sunny-500 text-grape-900' },
+  { key: 'failed_tasks', label: 'Missed', emoji: '😕', className: 'bg-bubble-400 border-bubble-600 text-white' },
+]
+const MEDALS = ['🥇', '🥈', '🥉']
 
 export default function ParentDashboard({ user, onLogout }: ParentDashboardProps) {
   const [tasks, setTasks] = useState<Task[]>([])
-  const [stats, setStats] = useState({ total_tasks: 0, completed_tasks: 0, pending_tasks: 0, in_progress_tasks: 0, failed_tasks: 0 })
-  const [children, setChildren] = useState<User[]>([])
-  const [selectedChildIds, setSelectedChildIds] = useState<number[]>([])
-  const [taskType, setTaskType] = useState<'adhoc' | 'recurring' | 'rotating'>('adhoc')
-  const [recurrence, setRecurrence] = useState('')
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [dueDate, setDueDate] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [priority, setPriority] = useState('Medium')
-  const [formError, setFormError] = useState('')
-  const [successMessage, setSuccessMessage] = useState('')
-  const [selectedTab, setSelectedTab] = useState<number | 'all'>('all')
-  const [taskLogs, setTaskLogs] = useState<Record<number, any[]>>({})
-  const [activeLogTaskId, setActiveLogTaskId] = useState<number | null>(null)
-  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [kids, setKids] = useState<User[]>([])
+  const [stats, setStats] = useState<ParentStats | null>(null)
+  const [filter, setFilter] = useState<number | 'all'>('all')
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<Task | null>(null)
+  const [log, setLog] = useState<{ task: Task; entries: StatusLog[] } | null>(null)
+  const [deleting, setDeleting] = useState<Task | null>(null)
+  const formRef = useRef<HTMLDivElement>(null)
+  const { toast, attempt } = useToast()
+  const cancelDelete = () => setDeleting(null)
 
-  const loadTasks = async () => {
-    setTasks(await fetchParentTasks())
-    setStats(await fetchStats())
-  }
-
-  const loadChildren = async () => {
-    setChildren(await fetchChildren())
-  }
-
-  useEffect(() => {
-    loadTasks()
-    loadChildren()
+  const load = useCallback(async () => {
+    const [nextTasks, nextStats, nextKids] = await Promise.all([fetchParentTasks(), fetchStats(), fetchChildren()])
+    setTasks(nextTasks)
+    setStats(nextStats)
+    setKids(nextKids)
   }, [])
 
-  const toggleChildSelection = (childId: number) => {
-    setSelectedChildIds((current) =>
-      current.includes(childId) ? current.filter((id) => id !== childId) : [...current, childId]
+  useEffect(() => {
+    attempt(load)
+  }, [attempt, load])
+
+  useEffect(() => {
+    if (formOpen) formRef.current!.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [formOpen, editing])
+
+  const closeForm = () => {
+    setFormOpen(false)
+    setEditing(null)
+  }
+
+  const saveTask = (input: TaskInput) =>
+    attempt(
+      async () => {
+        await (editing ? updateTask(editing.id, input) : createTask(input))
+        closeForm()
+        await load()
+      },
+      editing ? 'Task updated!' : 'Task created!',
     )
-  }
 
-  const resetForm = () => {
-    setTitle('')
-    setDescription('')
-    setDueDate('')
-    setStartDate('')
-    setPriority('Medium')
-    setSelectedChildIds([])
-    setRecurrence('')
-    setFormError('')
-    setEditingTask(null)
-  }
+  const refreshAfter = (action: () => Promise<unknown>, success?: string) => attempt(() => action().then(load), success)
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setFormError('')
-
-    if (selectedChildIds.length === 0) {
-      setFormError('Please assign this task to at least one child.')
-      return
-    }
-
-    if (taskType === 'rotating' && selectedChildIds.length < 2) {
-      setFormError('Rotating tasks require at least 2 children.')
-      return
-    }
-
-    if (taskType === 'adhoc' && !dueDate) {
-      setFormError('Ad-hoc tasks require a due date.')
-      return
-    }
-
-    if (taskType === 'adhoc' && dueDate) {
-      const selectedDate = new Date(dueDate)
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      if (selectedDate < today) {
-        setFormError('Due date cannot be in the past.')
-        return
-      }
-    }
-
-    if (taskType === 'recurring' && !recurrence) {
-      setFormError('Recurring tasks require a frequency.')
-      return
-    }
-
-    const taskData = {
-      title,
-      description,
-      due_date: taskType === 'adhoc' && dueDate ? new Date(dueDate).toISOString() : undefined,
-      start_date: taskType === 'recurring' && startDate ? new Date(startDate).toISOString() : undefined,
-      priority,
-      assignee_ids: selectedChildIds,
-      recurrence: (taskType === 'recurring' ? recurrence : undefined) as 'daily' | 'weekly' | 'monthly' | 'yearly' | undefined,
-      task_type: taskType as 'adhoc' | 'recurring' | 'rotating',
-    }
-
-    if (editingTask) {
-      await updateTask(editingTask.id, taskData)
-      setSuccessMessage('Task updated successfully!')
-    } else {
-      await createTask(taskData)
-      setSuccessMessage('Task created successfully!')
-    }
-
-    resetForm()
-    setTimeout(() => setSuccessMessage(''), 3000)
-    loadTasks()
-  }
-
-  const handleEditTask = (task: Task) => {
-    setEditingTask(task)
-    setTitle(task.title)
-    setDescription(task.description || '')
-    setPriority(task.priority || 'Medium')
-    setTaskType(task.task_type === 'rotating' ? 'rotating' : task.recurrence ? 'recurring' : 'adhoc')
-    setRecurrence(task.recurrence || '')
-    setSelectedChildIds(task.assignments.map((a) => a.child_id))
-
-    if (task.due_date) {
-      const d = new Date(task.due_date)
-      setDueDate(d.toISOString().split('T')[0])
-    } else {
-      setDueDate('')
-    }
-    if (task.start_date) {
-      const s = new Date(task.start_date)
-      setStartDate(s.toISOString().split('T')[0])
-    } else {
-      setStartDate('')
-    }
-
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  const selectedTasks = useMemo(
-    () =>
-      selectedTab === 'all'
-        ? tasks
-        : tasks.filter((task) => task.assignments.some((assignment) => assignment.child_id === selectedTab)),
-    [selectedTab, tasks]
-  )
-
-  const adHocTasks = selectedTasks.filter((task) => task.task_type === 'adhoc' && !task.recurrence)
-  const dailyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'daily')
-  const weeklyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'weekly')
-  const monthlyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'monthly')
-  const yearlyTasks = selectedTasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'yearly')
-  const rotatingTasks = selectedTasks.filter((task) => task.task_type === 'rotating')
-
-  const handleStatusChange = async (taskId: number, status: string) => {
-    await updateTaskStatus(taskId, status)
-    await loadTasks()
-  }
-
-  const showTaskLog = async (taskId: number) => {
-    if (activeLogTaskId === taskId) {
-      setActiveLogTaskId(null)
-      return
-    }
-
-    const logs = await fetchTaskLogs(taskId)
-    setTaskLogs((current) => ({ ...current, [taskId]: logs }))
-    setActiveLogTaskId(taskId)
-  }
-
-  const handleDeleteTask = async (taskId: number) => {
-    if (!window.confirm('Delete this task?')) {
-      return
-    }
-
-    await deleteTask(taskId)
-    await loadTasks()
-    if (activeLogTaskId === taskId) {
-      setActiveLogTaskId(null)
-    }
-  }
-
-  const handleAdvance = async (taskId: number) => {
-    await advanceTask(taskId)
-    await loadTasks()
-  }
-
-  const getUserName = (userId: number) => {
-    if (userId === user.id) return user.full_name || user.email
-    const child = children.find((c) => c.id === userId)
-    return child?.full_name || child?.username || child?.email || `User #${userId}`
-  }
-
-  const activeLogTask = activeLogTaskId !== null ? tasks.find((task) => task.id === activeLogTaskId) : undefined
+  const changedBy = (userId: number) => (userId === user.id ? userName(user) : nameFor(userId, kids))
+  const visible = filter === 'all' ? tasks : tasks.filter((task) => task.assignments.some((a) => a.child_id === filter))
 
   return (
-    <div className="relative mx-auto max-w-6xl px-4 py-8">
-      <Navbar
-        title={`Welcome, ${user.full_name || user.email}`}
-        actions={
-          <button onClick={onLogout} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm">
-            Logout
-          </button>
-        }
-      />
-      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        {successMessage && (
-          <div className="absolute top-4 left-1/2 z-50 -translate-x-1/2 rounded-2xl bg-emerald-500 px-6 py-3 text-sm font-semibold text-white shadow-lg transition-opacity">
-            {successMessage}
+    <div className="mx-auto max-w-6xl px-4 pb-16">
+      <Navbar user={user} onLogout={onLogout} />
+      {toast}
+
+      <section className="mb-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <div className="card border-grape-100">
+          <h1 className="text-3xl text-grape-900">Hello, {userName(user).split(' ')[0]}! 🌈</h1>
+          <p className="mt-1 text-grape-700">Here's how the family adventure is going.</p>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+            {TILES.map((tile) => (
+              <div key={tile.key} className={`rounded-3xl border-b-4 px-3 py-3 text-center first:col-span-2 sm:first:col-span-1 ${tile.className}`}>
+                <div className="text-2xl" aria-hidden="true">
+                  {tile.emoji}
+                </div>
+                <div className="text-2xl font-bold">{stats ? stats[tile.key] : 0}</div>
+                <div className="text-xs font-semibold uppercase tracking-wide">{tile.label}</div>
+              </div>
+            ))}
           </div>
-        )}
-        <article className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200">
-          <h2 className="text-2xl font-semibold text-slate-900">{editingTask ? 'Edit task' : 'Create a task'}</h2>
-          <p className="mt-2 text-sm text-kids-700">Make chores exciting by assigning clear tasks and rewards.</p>
-          <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input type="radio" checked={taskType === 'adhoc'} onChange={() => setTaskType('adhoc')} disabled={!!editingTask} />
-                <span>Ad-hoc task</span>
-              </label>
-              <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input type="radio" checked={taskType === 'recurring'} onChange={() => setTaskType('recurring')} disabled={!!editingTask} />
-                <span>Recurring task</span>
-              </label>
-              <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input type="radio" checked={taskType === 'rotating'} onChange={() => setTaskType('rotating')} disabled={!!editingTask} />
-                <span>Rotating task</span>
-              </label>
-            </div>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Task title"
-              className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-brand-500"
-              required
-            />
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Description"
-              className="w-full rounded-3xl border border-slate-300 px-4 py-3 outline-none focus:border-brand-500"
-              rows={4}
-            />
-            <div className="grid gap-4 md:grid-cols-2">
-              {taskType === 'adhoc' && (
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-brand-500"
-                  required
-                />
-              )}
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                className="rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-brand-500"
-              >
-                <option>Low</option>
-                <option>Medium</option>
-                <option>High</option>
-              </select>
-            </div>
-            {taskType === 'recurring' && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700">
-                  Frequency
-                  <select
-                    value={recurrence}
-                    onChange={(e) => setRecurrence(e.target.value)}
-                    className="mt-2 block w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-brand-500"
-                  >
-                    <option value="">Select a recurrence</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-                </label>
-              </div>
-            )}
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-              <p className="mb-3 text-sm font-semibold text-slate-700">Assign to children</p>
-              <div className="grid gap-3">
-                {children.length === 0 ? (
-                  <p className="text-sm text-slate-500">No child accounts found yet.</p>
-                ) : (
-                  children.map((child) => (
-                    <label key={child.id} className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedChildIds.includes(child.id)}
-                        onChange={() => toggleChildSelection(child.id)}
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                      />
-                      <span className="text-sm text-slate-700">{child.full_name || child.username || child.email}</span>
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-            {formError && <p className="text-sm text-rose-600">{formError}</p>}
-            <div className="flex gap-3">
-              <button className="flex-1 rounded-2xl bg-brand-500 px-4 py-3 text-white transition hover:bg-brand-600">
-                {editingTask ? 'Update task' : 'Create task'}
-              </button>
-              {editingTask && (
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-700 transition hover:bg-slate-100"
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
-          </form>
-        </article>
-        <article className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200">
-          <h2 className="text-2xl font-semibold text-slate-900">Summary</h2>
-          <p className="mt-2 text-sm text-kids-700">Track how the family is doing at a glance.</p>
-          <div className="mt-6 space-y-4">
-            <div className="rounded-3xl bg-slate-50 p-5">
-              <p className="text-sm text-slate-500">Total tasks</p>
-              <p className="mt-2 text-3xl font-semibold">{stats.total_tasks}</p>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-3xl bg-emerald-50 p-5">
-                <p className="text-sm text-emerald-700">Completed</p>
-                <p className="mt-2 text-2xl font-semibold text-emerald-900">{stats.completed_tasks}</p>
-              </div>
-              <div className="rounded-3xl bg-sky-50 p-5">
-                <p className="text-sm text-sky-700">In progress</p>
-                <p className="mt-2 text-2xl font-semibold text-sky-900">{stats.in_progress_tasks}</p>
-              </div>
-              <div className="rounded-3xl bg-rose-50 p-5">
-                <p className="text-sm text-rose-700">Failed</p>
-                <p className="mt-2 text-2xl font-semibold text-rose-900">{stats.failed_tasks}</p>
-              </div>
-              <div className="rounded-3xl bg-amber-50 p-5">
-                <p className="text-sm text-amber-700">Pending</p>
-                <p className="mt-2 text-2xl font-semibold text-amber-900">{stats.pending_tasks}</p>
-              </div>
-            </div>
-          </div>
-        </article>
+        </div>
+        <div className="card border-sunny-200">
+          <h2 className="text-2xl text-grape-900">⭐ Star champions</h2>
+          {stats && stats.children.length > 0 ? (
+            <ol className="mt-3 space-y-2">
+              {stats.children.map((entry, index) => (
+                <li key={entry.child_id} className="flex items-center gap-3 rounded-2xl bg-sunny-50 px-3 py-2">
+                  <span className="w-8 text-center text-2xl" aria-hidden="true">
+                    {MEDALS[index] ?? kidEmoji(entry.child_id)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-semibold">{entry.name}</span>
+                  <span className="chip bg-sunny-200 text-grape-900">⭐ {entry.stars}</span>
+                  <span className="chip bg-tangy-100 text-tangy-600" title="Day streak">
+                    🔥 {entry.streak_days}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="mt-3 text-grape-700">Stars appear here as kids finish their tasks.</p>
+          )}
+        </div>
       </section>
-      <section className="mt-8 rounded-3xl bg-white p-6 shadow-lg shadow-slate-200">
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            className={`rounded-2xl px-4 py-2 text-sm font-medium ${selectedTab === 'all' ? 'bg-brand-500 text-white' : 'bg-slate-100 text-slate-700'}`}
-            onClick={() => setSelectedTab('all')}
-          >
-            All tasks
+
+      <div ref={formRef} className="mb-6 scroll-mt-24">
+        {formOpen ? (
+          <section className="card border-bubble-200">
+            <h2 className="mb-4 text-2xl text-grape-900">{editing ? '✏️ Edit task' : '✨ New task'}</h2>
+            <TaskForm key={editing?.id ?? 'new'} kids={kids} editing={editing} onSubmit={saveTask} onCancel={closeForm} />
+          </section>
+        ) : (
+          <button type="button" className="btn-pink w-full text-lg sm:w-auto" onClick={() => setFormOpen(true)}>
+            ➕ New task
           </button>
-          {children.map((child) => (
+        )}
+      </div>
+
+      <nav aria-label="Filter by kid" className="-mx-4 mb-6 flex gap-2 overflow-x-auto px-4 pb-2">
+        {[{ id: 'all' as const, label: '🌈 Everyone' }, ...kids.map((kid) => ({ id: kid.id, label: `${kidEmoji(kid.id)} ${userName(kid)}` }))].map(
+          (option) => (
             <button
-              key={child.id}
+              key={option.id}
               type="button"
-              className={`rounded-2xl px-4 py-2 text-sm font-medium ${selectedTab === child.id ? 'bg-brand-500 text-white' : 'bg-slate-100 text-slate-700'}`}
-              onClick={() => setSelectedTab(child.id)}
+              aria-pressed={filter === option.id}
+              onClick={() => setFilter(option.id)}
+              className={`${filter === option.id ? 'btn-primary' : 'btn-ghost'} btn-sm shrink-0`}
             >
-              {child.full_name || child.username || child.email}
+              {option.label}
             </button>
-          ))}
-        </div>
-        <div className="mb-4 text-sm text-slate-500">
-          Showing {selectedTasks.length} task{selectedTasks.length === 1 ? '' : 's'} for {selectedTab === 'all' ? 'all children' : children.find((child) => child.id === selectedTab)?.full_name || selectedTab}.
-        </div>
-
-        <div className="space-y-8">
-          <section>
-            <h3 className="mb-4 text-xl font-semibold text-slate-900">Ad-hoc tasks</h3>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {adHocTasks.length === 0 ? (
-                <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No ad-hoc tasks yet.</div>
-              ) : (
-                adHocTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
-                ))
-              )}
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-4 text-xl font-semibold text-slate-900">Daily recurring</h3>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {dailyTasks.length === 0 ? (
-                <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No daily tasks yet.</div>
-              ) : (
-                dailyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
-                ))
-              )}
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-4 text-xl font-semibold text-slate-900">Weekly recurring</h3>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {weeklyTasks.length === 0 ? (
-                <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No weekly tasks yet.</div>
-              ) : (
-                weeklyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
-                ))
-              )}
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-4 text-xl font-semibold text-slate-900">Monthly recurring</h3>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {monthlyTasks.length === 0 ? (
-                <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No monthly tasks yet.</div>
-              ) : (
-                monthlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
-                ))
-              )}
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-4 text-xl font-semibold text-slate-900">Yearly recurring</h3>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {yearlyTasks.length === 0 ? (
-                <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No yearly tasks yet.</div>
-              ) : (
-                yearlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
-                ))
-              )}
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-4 text-xl font-semibold text-slate-900">Rotating</h3>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {rotatingTasks.length === 0 ? (
-                <div className="rounded-3xl bg-slate-50 p-6 text-slate-500 shadow-lg shadow-slate-200">No rotating tasks yet.</div>
-              ) : (
-                rotatingTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onStatusChange={handleStatusChange} onShowLog={showTaskLog} onDelete={handleDeleteTask} onEdit={handleEditTask} onAdvance={handleAdvance} children={children} />
-                ))
-              )}
-            </div>
-          </section>
-        </div>
-
-        {activeLogTaskId !== null && taskLogs[activeLogTaskId] && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-            <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-                <div>
-                  <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Status change log</p>
-                  <h3 className="text-xl font-semibold text-slate-900">{activeLogTask?.title || 'Task log'}</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveLogTaskId(null)}
-                  className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm text-slate-700 hover:bg-slate-200"
-                >
-                  Close
-                </button>
-              </div>
-              <div className="max-h-[70vh] overflow-y-auto p-6">
-                <div className="space-y-3">
-                  {taskLogs[activeLogTaskId].map((log) => (
-                    <div key={log.id} className="rounded-3xl bg-slate-50 p-4 shadow-sm">
-                      <p className="text-sm text-slate-500">{new Date(log.changed_at).toLocaleString()}</p>
-                      <p className="mt-2 text-sm text-slate-700">
-                        {getUserName(log.changed_by)} changed from <strong>{statusLabel[log.previous_status] || log.previous_status}</strong> to <strong>{statusLabel[log.new_status] || log.new_status}</strong>
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
+          ),
         )}
-      </section>
+      </nav>
+
+      <TaskSections
+        tasks={visible}
+        empty={<>🪁 No tasks here yet. Tap “New task” to start the fun!</>}
+        renderTask={(task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            viewer="parent"
+            kids={kids}
+            onStatusChange={(taskId, status: TaskStatus) => refreshAfter(() => updateTaskStatus(taskId, status))}
+            onOccurrenceStatusChange={(occurrenceId, status) => refreshAfter(() => updateOccurrenceStatus(occurrenceId, status))}
+            onAdvance={(taskId) => refreshAfter(() => advanceTask(taskId), 'Passed to the next kid! 🔄')}
+            onEdit={(t) => {
+              setEditing(t)
+              setFormOpen(true)
+            }}
+            onShowLog={(t) => attempt(async () => setLog({ task: t, entries: await fetchTaskLogs(t.id) }))}
+            onDelete={setDeleting}
+          />
+        )}
+      />
+
+      {log && (
+        <Modal title={log.task.title} subtitle="Status history" onClose={() => setLog(null)}>
+          <ul className="space-y-2">
+            {log.entries.map((entry) => (
+              <li key={entry.id} className="rounded-2xl bg-grape-50 px-4 py-3">
+                <p className="text-sm text-grape-400">{new Date(entry.changed_at).toLocaleString()}</p>
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-grape-900">
+                  <strong>{changedBy(entry.changed_by)}</strong> <StatusPill status={entry.previous_status} /> ➜ <StatusPill status={entry.new_status} />
+                </p>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
+
+      {deleting && (
+        <Modal title={`Delete “${deleting.title}”?`} subtitle="Are you sure?" onClose={cancelDelete}>
+          <p className="text-grape-700">This removes the task and its history for everyone.</p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <button type="button" className="btn-ghost" onClick={cancelDelete}>
+              Keep it
+            </button>
+            <button
+              type="button"
+              className="btn-danger"
+              onClick={() =>
+                refreshAfter(async () => {
+                  await deleteTask(deleting.id)
+                  setDeleting(null)
+                }, 'Task deleted')
+              }
+            >
+              🗑️ Delete
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

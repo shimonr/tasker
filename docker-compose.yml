@@ -1,20 +1,24 @@
-version: '3.9'
+# Local production-like stack: http://localhost:8080
+# For hot reload, run uvicorn and `npm run dev` directly instead (see README).
 services:
   backend:
-    build: ./backend
-    ports:
-      - '8000:8000'
-    volumes:
-      - ./backend:/app
-      - ./backend/tasker.db:/app/tasker.db
-    environment:
-      - FRONTEND_ORIGIN=http://localhost:5173
-  frontend:
-    working_dir: /app
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - '5173:5173'
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: sqlite:////data/tasker.db
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-please}
+      APP_BASE_URL: http://localhost:8080
+      FRONTEND_ORIGIN: http://localhost:8080
     volumes:
-      - ./frontend:/app
+      - backend-data:/data
+  web:
+    build: ./frontend
+    ports:
+      - '8080:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  backend-data:

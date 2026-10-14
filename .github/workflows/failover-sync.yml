@@ -1,0 +1,72 @@
+name: Failover database sync
+
+# Keeps the Railway/Vercel deployment a warm standby by copying the Oracle prod database to Railway
+# every night. During an outage set the repository variable FAILOVER_ACTIVE=true so the nightly copy
+# cannot overwrite data written on Railway; afterwards run this workflow with "railway-to-oracle".
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+    inputs:
+      direction:
+        description: Which way to copy the database
+        type: choice
+        options: [oracle-to-railway, railway-to-oracle]
+        default: oracle-to-railway
+
+permissions:
+  contents: read
+
+concurrency:
+  group: failover-sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    environment: oracle-prod
+    env:
+      DIRECTION: ${{ inputs.direction || 'oracle-to-railway' }}
+      ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+      ORACLE_USER: ${{ secrets.ORACLE_USER }}
+      RAILWAY_DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_URL }}
+      PG_CLIENT: postgres:17-alpine
+    steps:
+      - name: Check configuration
+        id: config
+        run: |
+          if [ -z "$ORACLE_HOST" ] || [ -z "$RAILWAY_DATABASE_URL" ]; then
+            echo "::warning::Sync skipped: set ORACLE_HOST, ORACLE_USER, ORACLE_SSH_KEY and RAILWAY_DATABASE_URL secrets."
+            echo "ready=false" >>"$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = schedule ] && [ "${{ vars.FAILOVER_ACTIVE }}" = true ]; then
+            echo "::warning::FAILOVER_ACTIVE=true - not overwriting Railway."
+            echo "ready=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >>"$GITHUB_OUTPUT"
+          fi
+      - name: Set up SSH
+        if: steps.config.outputs.ready == 'true'
+        env:
+          SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" >~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          if [ -n "$KNOWN_HOSTS" ]; then printf '%s\n' "$KNOWN_HOSTS" >~/.ssh/known_hosts; else ssh-keyscan -H "$ORACLE_HOST" >~/.ssh/known_hosts; fi
+          printf 'Host oracle\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_deploy\n' "$ORACLE_HOST" "$ORACLE_USER" >~/.ssh/config
+      - name: Copy Oracle prod -> Railway
+        if: steps.config.outputs.ready == 'true' && env.DIRECTION == 'oracle-to-railway'
+        run: |
+          set -o pipefail
+          ssh oracle "docker exec tasker-prod-db-1 pg_dump -U tasker --clean --if-exists --no-owner --no-privileges tasker" >dump.sql
+          grep -q 'CREATE TABLE public.users' dump.sql
+          docker run --rm -i "$PG_CLIENT" psql "$RAILWAY_DATABASE_URL" -q -v ON_ERROR_STOP=1 --single-transaction <dump.sql >/dev/null
+      - name: Copy Railway -> Oracle prod (fail-back)
+        if: steps.config.outputs.ready == 'true' && env.DIRECTION == 'railway-to-oracle'
+        run: |
+          set -o pipefail
+          ssh oracle "bash /opt/tasker/src/prod/deploy/oracle/backup.sh prod"
+          # pg_dump 17 emits settings PostgreSQL 16 does not know; drop them.
+          docker run --rm "$PG_CLIENT" pg_dump "$RAILWAY_DATABASE_URL" --clean --if-exists --no-owner --no-privileges \
+            | sed '/^SET transaction_timeout/d' >dump.sql
+          grep -q 'CREATE TABLE public.users' dump.sql
+          ssh oracle "docker exec -i tasker-prod-db-1 psql -U tasker -d tasker -q -v ON_ERROR_STOP=1 --single-transaction" <dump.sql >/dev/null

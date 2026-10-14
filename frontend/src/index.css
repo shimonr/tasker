@@ -2,12 +2,103 @@
 @tailwind components;
 @tailwind utilities;
 
-html {
-  scroll-behavior: smooth;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply min-h-screen bg-sunny-50 font-sans text-grape-900 antialiased;
+  }
+
+  /* A fixed layer instead of background-attachment: fixed, which iOS Safari ignores. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -20;
+    background-image:
+      radial-gradient(circle at 8% 12%, rgba(255, 212, 59, 0.45), transparent 28%),
+      radial-gradient(circle at 92% 8%, rgba(255, 122, 184, 0.35), transparent 30%),
+      radial-gradient(circle at 85% 88%, rgba(77, 192, 255, 0.35), transparent 32%),
+      radial-gradient(circle at 10% 90%, rgba(111, 220, 59, 0.3), transparent 30%);
+  }
+
+  h1, h2, h3 {
+    @apply font-bold tracking-tight;
+  }
+
+  /* 16px+ inputs stop iOS from zooming in on focus. */
+  input, select, textarea {
+    font-size: 16px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased;
-  font-family: "Comic Sans MS", "Comic Neue", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background-image: radial-gradient(circle at top left, rgba(252, 211, 77, 0.22), transparent 18%), radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.16), transparent 24%);
+@layer components {
+  .card {
+    @apply rounded-[28px] border-4 border-white bg-white p-5 shadow-chunky sm:p-6;
+  }
+
+  .btn {
+    @apply inline-flex min-h-[44px] select-none items-center justify-center gap-2 rounded-full border-b-4 px-5 py-2 text-base font-bold transition active:translate-y-[2px] active:border-b-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:active:translate-y-0;
+  }
+  .btn-primary {
+    @apply btn border-grape-700 bg-grape-500 text-white hover:bg-grape-600;
+  }
+  .btn-success {
+    @apply btn border-leaf-600 bg-leaf-500 text-white hover:bg-leaf-600;
+  }
+  .btn-sunny {
+    @apply btn border-sunny-500 bg-sunny-300 text-grape-900 hover:bg-sunny-400;
+  }
+  .btn-pink {
+    @apply btn border-bubble-600 bg-bubble-500 text-white hover:bg-bubble-600;
+  }
+  .btn-ghost {
+    @apply btn border-grape-200 bg-white text-grape-700 hover:bg-grape-50;
+  }
+  .btn-danger {
+    @apply btn border-rose-700 bg-rose-500 text-white hover:bg-rose-600;
+  }
+  .btn-sm {
+    @apply min-h-[40px] px-4 py-1 text-sm;
+  }
+
+  .input {
+    @apply block w-full rounded-2xl border-2 border-grape-100 bg-white px-4 py-3 text-grape-900 outline-none transition placeholder:text-grape-400/70 focus:border-grape-400 focus:ring-4 focus:ring-grape-100;
+  }
+  select.input {
+    @apply appearance-none bg-no-repeat pr-10;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%237c3aed'%3E%3Cpath d='M5.3 7.3a1 1 0 0 1 1.4 0L10 10.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 0-1.4z'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+    background-size: 1.25rem;
+  }
+  .label {
+    @apply mb-1 block text-sm font-semibold text-grape-700;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-semibold;
+  }
+
+  /* Radio/checkbox tiles: the input is visually hidden, the label shows the state. */
+  .choice {
+    @apply flex min-h-[44px] cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-grape-100 bg-white px-3 py-2 text-center font-semibold text-grape-700 transition hover:border-grape-300 has-[:checked]:border-grape-500 has-[:checked]:bg-grape-50 has-[:checked]:text-grape-900 has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-grape-200;
+  }
+}
+
+@layer utilities {
+  .safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
 }

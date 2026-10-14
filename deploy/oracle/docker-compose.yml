@@ -1,0 +1,65 @@
+# One Family Task Manager environment (prod or qa) on the Oracle server.
+# Started by deploy.sh with --env-file /opt/tasker/<env>.env; see deploy/oracle/README.md.
+name: tasker-${TASKER_ENV:?TASKER_ENV must be prod or qa}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tasker
+      POSTGRES_USER: tasker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tasker -d tasker']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${TASKER_ENV}
+      DATABASE_URL: postgresql://tasker:${POSTGRES_PASSWORD}@db:5432/tasker
+      TASKER_SECRET_KEY: ${TASKER_SECRET_KEY:?}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      APP_BASE_URL: https://${APP_DOMAIN:?}
+      FRONTEND_ORIGIN: https://${APP_DOMAIN}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      EMAIL_SENDER_ADDRESS: ${EMAIL_SENDER_ADDRESS:-}
+      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-Family Task Adventure}
+      EMAIL_OVERRIDE_RECIPIENT: ${EMAIL_OVERRIDE_RECIPIENT:-}
+    networks: [internal]
+
+  web:
+    build: ../../frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      API_UPSTREAM: http://backend:8000
+    networks:
+      internal: {}
+      edge:
+        # The shared Caddy proxy reaches each environment by this name.
+        aliases: ['tasker-${TASKER_ENV}-web']
+
+volumes:
+  db-data:
+
+networks:
+  internal: {}
+  edge:
+    external: true
+    name: edge

@@ -1,85 +1,85 @@
 import { FormEvent, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
+import AuthLayout from '../components/AuthLayout'
 
 interface LoginPageProps {
-  onLogin: (username: string, password: string) => Promise<any>
+  onLogin: (username: string, password: string) => Promise<unknown>
 }
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [success, setSuccess] = useState(false)
-  const navigate = useNavigate()
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setError(null)
+    setError('')
     setLoading(true)
     try {
-      const me = await onLogin(username, password)
-      setSuccess(true)
-      setTimeout(() => {
-        const target = me.role === 'parent' ? '/parent' : me.role === 'child' ? '/child' : '/admin'
-        navigate(target)
-      }, 600)
+      await onLogin(username, password)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Login failed. Please check your username and password.'
-      setError(message)
-    } finally {
+      setError((err as Error).message)
       setLoading(false)
     }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl shadow-slate-200">
-        <h1 className="text-3xl font-semibold text-slate-900">Family Task Manager</h1>
-        <p className="mt-2 text-slate-600">Sign in to manage household tasks.</p>
-        <div className="mt-4 rounded-3xl bg-kids-100 p-4 text-kids-900 shadow-inner shadow-kids-200">
-          <p className="text-sm font-medium">Fun chores, prizes, and team play!</p>
+    <AuthLayout title="Welcome back! 👋" subtitle="Sign in to see today's missions.">
+      <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+        <div>
+          <label className="label" htmlFor="username">
+            Username or email
+          </label>
+          <input
+            id="username"
+            autoComplete="username"
+            autoCapitalize="none"
+            required
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            className="input"
+          />
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <label className="block text-sm font-medium text-slate-700">
-              Username
-              <input
-                type="text"
-                required
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                className="mt-2 block w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              />
-            </label>
-            <label className="block text-sm font-medium text-slate-700">
-              Password
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="mt-2 block w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              />
-            </label>
+        <div>
+          <label className="label" htmlFor="password">
+            Password
+          </label>
+          <div className="relative">
+            <input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="input pr-14"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute inset-y-0 right-2 my-auto h-10 w-10 rounded-full text-xl hover:bg-grape-50"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? '🙈' : '👀'}
+            </button>
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full inline-flex items-center justify-center gap-3 rounded-2xl bg-brand-500 px-4 py-3 text-white transition hover:bg-brand-600 disabled:opacity-60"
-          >
-            {loading ? (
-              <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-            ) : null}
-            {loading ? 'Signing in...' : 'Sign in'}
-          </button>
-          {success && <div className="mt-3 rounded-md bg-emerald-50 p-3 text-emerald-700">Login successful — redirecting...</div>}
-        </form>
-      </div>
-    </main>
+        </div>
+        {error && (
+          <p role="alert" className="rounded-2xl bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600">
+            {error}
+          </p>
+        )}
+        <button type="submit" disabled={loading} className="btn-primary w-full text-lg">
+          {loading ? '🚀 Signing in…' : "🚀 Let's go!"}
+        </button>
+        <p className="text-center">
+          <Link to="/forgot-password" className="font-semibold text-grape-600 underline decoration-wavy decoration-bubble-400 underline-offset-4">
+            Forgot your password?
+          </Link>
+        </p>
+      </form>
+    </AuthLayout>
   )
 }

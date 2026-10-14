@@ -1,180 +1,123 @@
-import { useEffect, useState } from 'react'
-import { completeTask, fetchChildTasks, updateTaskStatus } from '../api'
-import { Task, User } from '../types'
+import { useCallback, useEffect, useState } from 'react'
+import { completeOccurrence, completeTask, fetchChildStats, fetchChildTasks, updateTaskStatus } from '../api'
+import type { ChildStats, Task, User } from '../types'
+import Confetti from '../components/Confetti'
 import Navbar from '../components/Navbar'
 import TaskCard from '../components/TaskCard'
+import TaskSections from '../components/TaskSections'
+import { useToast } from '../components/Toast'
+import { currentOccurrence, kidEmoji, userName } from '../lib/tasks'
 
 interface ChildDashboardProps {
   user: User
   onLogout: () => void
 }
 
+function StatBubble({ emoji, value, label, className }: { emoji: string; value: number; label: string; className: string }) {
+  return (
+    <div className={`flex flex-col items-center rounded-3xl border-b-4 px-2 py-3 text-center ${className}`}>
+      <span className="text-3xl" aria-hidden="true">
+        {emoji}
+      </span>
+      <span className="text-2xl font-bold sm:text-3xl">{value}</span>
+      <span className="text-xs font-semibold uppercase tracking-wide sm:text-sm">{label}</span>
+    </div>
+  )
+}
+
 export default function ChildDashboard({ user, onLogout }: ChildDashboardProps) {
   const [tasks, setTasks] = useState<Task[]>([])
-  const childId = user.id
+  const [stats, setStats] = useState<ChildStats>({ stars: 0, completed_count: 0, streak_days: 0 })
+  const [loaded, setLoaded] = useState(false)
+  const [celebrations, setCelebrations] = useState(0)
+  const { toast, attempt } = useToast()
 
-  const loadTasks = async () => {
-    setTasks(await fetchChildTasks())
-  }
-
-  useEffect(() => {
-    loadTasks()
+  const load = useCallback(async () => {
+    const [nextTasks, nextStats] = await Promise.all([fetchChildTasks(), fetchChildStats()])
+    setTasks(nextTasks)
+    setStats(nextStats)
+    setLoaded(true)
   }, [])
 
-  const handleComplete = async (taskId: number) => {
-    await completeTask(taskId)
-    loadTasks()
+  useEffect(() => {
+    attempt(load)
+  }, [attempt, load])
+
+  const celebrate = async (action: () => Promise<unknown>) => {
+    if (await attempt(() => action().then(load), 'Awesome job! You earned stars ⭐')) {
+      setCelebrations((n) => n + 1)
+    }
   }
 
-  const handleStatusChange = async (taskId: number, status: string) => {
-    await updateTaskStatus(taskId, status)
-    loadTasks()
-  }
-
-  const adHocTasks = tasks.filter((task) => task.task_type === 'adhoc' && !task.recurrence)
-  const dailyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'daily')
-  const weeklyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'weekly')
-  const monthlyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'monthly')
-  const yearlyTasks = tasks.filter((task) => task.task_type === 'recurring' && task.recurrence === 'yearly')
-  const rotatingTasks = tasks.filter((task) => task.task_type === 'rotating')
+  const isDone = (task: Task) =>
+    task.task_type === 'recurring'
+      ? currentOccurrence(task)?.status === 'completed'
+      : Boolean(task.assignments.find((a) => a.child_id === user.id)?.completed)
+  const doneCount = tasks.filter(isDone).length
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
-      <Navbar
-        title={`Hi, ${user.full_name || user.email}`}
-        actions={
-          <button onClick={onLogout} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm">
-            Logout
-          </button>
-        }
-      />
-      <div className="mb-6 rounded-3xl bg-gradient-to-r from-kids-100 via-white to-slate-50 p-6 shadow-lg shadow-kids-100">
-        <p className="text-sm text-kids-700">Your task board is ready! Complete chores to earn badges and smiles.</p>
-      </div>
-      <section className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-brand-700">Child view</p>
-            <h2 className="mt-2 text-3xl font-semibold text-slate-900">Your tasks</h2>
-          </div>
-          <p className="rounded-3xl bg-slate-100 px-4 py-3 text-sm text-slate-600">Stay on track and earn reward points!</p>
-        </div>
-        <div className="mt-6 space-y-10">
-          <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">One-time</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-900">Ad-hoc tasks</h3>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">{adHocTasks.length} items</span>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {adHocTasks.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No ad-hoc tasks assigned yet.</div>
-              ) : (
-                adHocTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
-                ))
-              )}
-            </div>
-          </div>
+    <div className="mx-auto max-w-5xl px-4 pb-16">
+      <Navbar user={user} onLogout={onLogout} />
+      {toast}
+      {celebrations > 0 && <Confetti key={celebrations} />}
 
+      <section className="card mb-8 border-sunny-200 bg-gradient-to-br from-sunny-100 via-white to-bubble-50">
+        <div className="flex items-center gap-4">
+          <span className="text-6xl" aria-hidden="true">
+            {kidEmoji(user.id)}
+          </span>
           <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Daily</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-900">Daily tasks</h3>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">{dailyTasks.length} items</span>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {dailyTasks.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No daily tasks assigned yet.</div>
-              ) : (
-                dailyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
-                ))
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Weekly</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-900">Weekly tasks</h3>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">{weeklyTasks.length} items</span>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {weeklyTasks.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No weekly tasks assigned yet.</div>
-              ) : (
-                weeklyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
-                ))
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Monthly</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-900">Monthly tasks</h3>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">{monthlyTasks.length} items</span>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {monthlyTasks.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No monthly tasks assigned yet.</div>
-              ) : (
-                monthlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
-                ))
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Yearly</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-900">Yearly tasks</h3>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">{yearlyTasks.length} items</span>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {yearlyTasks.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No yearly tasks assigned yet.</div>
-              ) : (
-                yearlyTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
-                ))
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Rotating</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-900">Rotating tasks</h3>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">{rotatingTasks.length} items</span>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {rotatingTasks.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 p-6 text-slate-500">No rotating tasks assigned yet.</div>
-              ) : (
-                rotatingTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} onComplete={handleComplete} onStatusChange={handleStatusChange} isChildView childId={childId} />
-                ))
-              )}
-            </div>
+            <h1 className="text-3xl text-grape-900 sm:text-4xl">Hi {userName(user).split(' ')[0]}! 👋</h1>
+            <p className="text-grape-700">Ready for today's adventure?</p>
           </div>
         </div>
+        <div className="mt-5 grid grid-cols-3 gap-3">
+          <StatBubble emoji="⭐" value={stats.stars} label="Stars" className="border-sunny-400 bg-sunny-200 text-grape-900" />
+          <StatBubble emoji="🔥" value={stats.streak_days} label="Day streak" className="border-tangy-600 bg-tangy-400 text-white" />
+          <StatBubble emoji="✅" value={stats.completed_count} label="Done" className="border-leaf-600 bg-leaf-400 text-white" />
+        </div>
+        {tasks.length > 0 && (
+          <div className="mt-5">
+            <div className="mb-1 flex justify-between text-sm font-semibold text-grape-700">
+              <span>Today's progress</span>
+              <span>
+                {doneCount} of {tasks.length} done
+              </span>
+            </div>
+            <div
+              className="h-5 overflow-hidden rounded-full bg-white ring-2 ring-grape-100"
+              role="progressbar"
+              aria-label="Today's progress"
+              aria-valuemin={0}
+              aria-valuemax={tasks.length}
+              aria-valuenow={doneCount}
+            >
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-bubble-400 via-sunny-300 to-leaf-400 transition-all duration-700"
+                style={{ width: `${(doneCount / tasks.length) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
       </section>
+
+      {loaded && (
+        <TaskSections
+          tasks={[...tasks].sort((a, b) => Number(isDone(a)) - Number(isDone(b)))}
+          empty={<>🎈 No tasks right now. Go play!</>}
+          renderTask={(task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              viewer="child"
+              childId={user.id}
+              onComplete={(taskId) => celebrate(() => completeTask(taskId))}
+              onCompleteOccurrence={(occurrenceId) => celebrate(() => completeOccurrence(occurrenceId))}
+              onStart={(taskId) => attempt(() => updateTaskStatus(taskId, 'in_progress').then(load), "Go go go! 🚀")}
+            />
+          )}
+        />
+      )}
     </div>
   )
 }

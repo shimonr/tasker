@@ -1,8 +1,10 @@
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Text, Boolean
+import enum
+
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from .database import Base
-import enum
 
 
 class UserRole(str, enum.Enum):
@@ -32,12 +34,14 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=True)
     full_name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=False)
-    display_password = Column(String, nullable=True)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.child)
+    # Bumped on every password change so older tokens stop working.
+    token_version = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    tasks_created = relationship("Task", back_populates="creator")
-    assignments = relationship("TaskAssignment", back_populates="child")
+    tasks_created = relationship("Task", back_populates="creator", cascade="all, delete-orphan")
+    assignments = relationship("TaskAssignment", back_populates="child", cascade="all, delete-orphan")
+    completion_events = relationship("CompletionEvent", back_populates="child", cascade="all, delete-orphan")
 
 
 class Task(Base):
@@ -57,9 +61,14 @@ class Task(Base):
     task_type = Column(Enum(TaskType), nullable=False, default=TaskType.adhoc)
 
     creator = relationship("User", back_populates="tasks_created")
-    assignments = relationship("TaskAssignment", back_populates="task", cascade="all, delete")
+    assignments = relationship("TaskAssignment", back_populates="task", cascade="all, delete-orphan")
     status_logs = relationship("TaskStatusLog", back_populates="task", cascade="all, delete-orphan")
-    occurrences = relationship("TaskOccurrence", back_populates="task", cascade="all, delete-orphan")
+    occurrences = relationship(
+        "TaskOccurrence",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="TaskOccurrence.occurrence_date.desc()",
+    )
 
 
 class TaskStatusLog(Base):
@@ -99,5 +108,28 @@ class TaskOccurrence(Base):
     occurrence_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.pending)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_by = Column(Integer, nullable=True)
 
     task = relationship("Task", back_populates="occurrences")
+
+
+class CompletionEvent(Base):
+    """A star award: one row per chore a child completes. Survives task deletion and rotation resets."""
+
+    __tablename__ = "completion_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    child_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id = Column(Integer, nullable=True)
+    task_title = Column(String, nullable=False)
+    stars = Column(Integer, nullable=False, default=1)
+    completed_at = Column(DateTime(timezone=True), nullable=False)
+
+    child = relationship("User", back_populates="completion_events")
+
+
+class AppSecret(Base):
+    __tablename__ = "app_secrets"
+
+    name = Column(String, primary_key=True)
+    value = Column(String, nullable=False)

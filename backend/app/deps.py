@@ -1,7 +1,9 @@
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from . import auth, crud, database, schemas, models
+
+from . import auth, crud, database, models
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
 
@@ -15,17 +17,19 @@ def get_db():
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
-        payload = auth.decode_access_token(token)
-        email: str = payload.get("sub")
-        if email is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
-        token_data = schemas.TokenData(email=email, role=payload.get("role"))
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
-    user = crud.get_user_by_email(db, token_data.email)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        payload = auth.decode_token(token, "access")
+        user_id = int(payload["sub"])
+    except (jwt.PyJWTError, KeyError, ValueError):
+        raise credentials_error
+    user = crud.get_user(db, user_id)
+    if user is None or payload.get("ver") != user.token_version:
+        raise credentials_error
     return user
 
 

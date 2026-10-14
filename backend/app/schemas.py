@@ -1,7 +1,16 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel, EmailStr
+from typing import Annotated, List, Literal, Optional
+
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from .timeutil import as_utc
+
+# Datetimes are normalized to aware UTC both on input and on output, so the frontend
+# always receives an explicit offset and SQLite round-trips do not shift times.
+UTCDateTime = Annotated[datetime, AfterValidator(as_utc)]
+Priority = Literal["Low", "Medium", "High"]
+Password = Annotated[str, Field(min_length=8, max_length=128)]
 
 
 class UserRole(str, Enum):
@@ -30,61 +39,94 @@ class TaskType(str, Enum):
     rotating = "rotating"
 
 
+class ORMModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
 
 
-class TokenData(BaseModel):
-    email: Optional[str] = None
+class Message(BaseModel):
+    message: str
+
+
+class Health(BaseModel):
+    status: str
+    version: str
+    environment: str
+
+
+class _UserFields(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    @field_validator("username", "full_name", mode="before", check_fields=False)
+    @classmethod
+    def blank_to_none(cls, value):
+        # Empty strings would collide on the unique username column.
+        return str(value or "").strip() or None
+
+
+class UserCreate(_UserFields):
+    email: EmailStr
+    username: Optional[str] = Field(None, max_length=50)
+    full_name: Optional[str] = Field(None, max_length=100)
+    role: UserRole
+    password: Password
+
+
+class UserUpdate(_UserFields):
+    email: Optional[EmailStr] = None
+    username: Optional[str] = Field(None, max_length=50)
+    full_name: Optional[str] = Field(None, max_length=100)
     role: Optional[UserRole] = None
 
 
-class UserBase(BaseModel):
-    email: EmailStr
+class UserRead(ORMModel):
+    id: int
+    email: str
     username: Optional[str] = None
     full_name: Optional[str] = None
     role: UserRole
+    created_at: UTCDateTime
 
 
-class UserCreate(UserBase):
-    password: str
+class AdminPasswordReset(BaseModel):
+    email: str
+    new_password: Password
 
 
-class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    username: Optional[str] = None
-    full_name: Optional[str] = None
-    role: Optional[UserRole] = None
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
 
 
-class UserRead(UserBase):
-    username: Optional[str] = None
-    id: int
-    created_at: datetime
-    display_password: Optional[str] = None
-
-    class Config:
-        orm_mode = True
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: Password
 
 
-class TaskCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-    due_date: Optional[datetime] = None
-    start_date: Optional[datetime] = None
-    priority: Optional[str] = None
-    assignee_ids: Optional[List[int]] = []
+class _TaskFields(BaseModel):
+    model_config = ConfigDict(use_enum_values=True, str_strip_whitespace=True)
+
+
+class TaskCreate(_TaskFields):
+    title: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=2000)
+    due_date: Optional[UTCDateTime] = None
+    start_date: Optional[UTCDateTime] = None
+    priority: Optional[Priority] = None
+    assignee_ids: List[int] = []
     recurrence: Optional[TaskRecurrence] = None
-    task_type: Optional[TaskType] = TaskType.adhoc
+    task_type: TaskType = TaskType.adhoc
 
 
-class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    due_date: Optional[datetime] = None
-    start_date: Optional[datetime] = None
-    priority: Optional[str] = None
+class TaskUpdate(_TaskFields):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=2000)
+    due_date: Optional[UTCDateTime] = None
+    start_date: Optional[UTCDateTime] = None
+    priority: Optional[Priority] = None
     status: Optional[TaskStatus] = None
     assignee_ids: Optional[List[int]] = None
     recurrence: Optional[TaskRecurrence] = None
@@ -95,62 +137,65 @@ class TaskStatusUpdate(BaseModel):
     status: TaskStatus
 
 
-class TaskStatusLogRead(BaseModel):
+class TaskStatusLogRead(ORMModel):
     id: int
     task_id: int
     changed_by: int
     previous_status: TaskStatus
     new_status: TaskStatus
-    changed_at: datetime
-
-    class Config:
-        orm_mode = True
+    changed_at: UTCDateTime
 
 
-class AssignmentRead(BaseModel):
+class AssignmentRead(ORMModel):
     id: int
     child_id: int
     completed: bool
-    completed_at: Optional[datetime] = None
-    assigned_at: datetime
+    completed_at: Optional[UTCDateTime] = None
+    assigned_at: UTCDateTime
     rotation_order: Optional[int] = None
     is_active: bool = True
 
-    class Config:
-        orm_mode = True
 
-
-class OccurrenceRead(BaseModel):
+class OccurrenceRead(ORMModel):
     id: int
     task_id: int
-    occurrence_date: datetime
+    occurrence_date: UTCDateTime
     status: TaskStatus
-    completed_at: Optional[datetime] = None
-
-    class Config:
-        orm_mode = True
+    completed_at: Optional[UTCDateTime] = None
+    completed_by: Optional[int] = None
 
 
-class TaskRead(BaseModel):
+class TaskRead(ORMModel):
     id: int
     title: str
     description: Optional[str] = None
-    due_date: Optional[datetime] = None
-    start_date: Optional[datetime] = None
+    due_date: Optional[UTCDateTime] = None
+    start_date: Optional[UTCDateTime] = None
     priority: Optional[str] = None
     recurrence: Optional[TaskRecurrence] = None
     task_type: TaskType = TaskType.adhoc
     status: TaskStatus
     created_by: int
-    created_at: datetime
+    created_at: UTCDateTime
     assignments: List[AssignmentRead] = []
-    status_logs: List[TaskStatusLogRead] = []
     occurrences: List[OccurrenceRead] = []
 
-    class Config:
-        orm_mode = True
+
+class ChildStats(BaseModel):
+    stars: int
+    completed_count: int
+    streak_days: int
 
 
-class LoginData(BaseModel):
-    email: EmailStr
-    password: str
+class ChildLeaderboardEntry(ChildStats):
+    child_id: int
+    name: str
+
+
+class ParentStats(BaseModel):
+    total_tasks: int
+    completed_tasks: int
+    pending_tasks: int
+    in_progress_tasks: int
+    failed_tasks: int
+    children: List[ChildLeaderboardEntry]
