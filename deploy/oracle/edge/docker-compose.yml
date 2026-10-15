@@ -1,28 +1,27 @@
-# Shared HTTPS reverse proxy for both environments. Caddy gets Let's Encrypt certificates automatically.
-name: tasker-edge
+# Shared HTTPS reverse proxy (caddy-docker-proxy). It routes every container on the "web" network
+# that has `caddy` labels and gets Let's Encrypt certificates automatically.
+# deploy.sh starts it only when nothing else already serves ports 80/443 on the server.
+name: proxy
 
 services:
   caddy:
-    image: caddy:2-alpine
+    image: lucaslorentz/caddy-docker-proxy:2.13-alpine
     restart: unless-stopped
     ports:
       - '80:80'
       - '443:443'
       - '443:443/udp'
     environment:
-      PROD_DOMAIN: ${PROD_DOMAIN:?}
-      QA_DOMAIN: ${QA_DOMAIN:?}
+      CADDY_INGRESS_NETWORKS: web
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - caddy-data:/data
-      - caddy-config:/config
-    networks: [edge]
+    networks: [web]
 
 volumes:
   caddy-data:
-  caddy-config:
 
 networks:
-  edge:
+  web:
     external: true
-    name: edge
+    name: web

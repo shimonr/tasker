@@ -46,10 +46,6 @@ PUBLIC_IP=$(curl -fsS --max-time 5 https://ifconfig.me || hostname -I | awk '{pr
 PROD_DOMAIN=${1:-tasker.$PUBLIC_IP.sslip.io}
 QA_DOMAIN=${2:-qa.tasker.$PUBLIC_IP.sslip.io}
 
-if [ ! -f "$ROOT/edge.env" ]; then
-  printf 'PROD_DOMAIN=%s\nQA_DOMAIN=%s\n' "$PROD_DOMAIN" "$QA_DOMAIN" >"$ROOT/edge.env"
-fi
-
 write_env() { # name domain
   local file="$ROOT/$1.env"
   [ -f "$file" ] && return
@@ -72,7 +68,7 @@ EOF
   if [ "$1" = qa ]; then
     printf '# QA: send every email to this address instead of real users.\nEMAIL_OVERRIDE_RECIPIENT=\n' >>"$file"
   fi
-  echo "    created $file (admin password: $admin_password)"
+  echo "    created $file (the admin password is in that file)"
 }
 write_env prod "$PROD_DOMAIN"
 write_env qa "$QA_DOMAIN"

@@ -49,17 +49,19 @@ services:
         condition: service_healthy
     environment:
       API_UPSTREAM: http://backend:8000
-    networks:
-      internal: {}
-      edge:
-        # The shared Caddy proxy reaches each environment by this name.
-        aliases: ['tasker-${TASKER_ENV}-web']
+    labels:
+      # Read by the shared caddy-docker-proxy, which gets the HTTPS certificate and routes the domain here.
+      caddy: ${APP_DOMAIN}
+      caddy.reverse_proxy: '{{upstreams 80}}'
+      caddy.encode: zstd gzip
+      caddy.header: Strict-Transport-Security "max-age=31536000"
+    networks: [internal, proxy]
 
 volumes:
   db-data:
 
 networks:
   internal: {}
-  edge:
+  proxy:
     external: true
-    name: edge
+    name: ${PROXY_NETWORK:-web}

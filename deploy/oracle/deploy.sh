@@ -14,13 +14,15 @@ ROOT=${TASKER_ROOT:-/opt/tasker}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ENV_FILE="$ROOT/$ENV_NAME.env"
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE (run bootstrap.sh first)" >&2; exit 1; }
-[ -f "$ROOT/edge.env" ] || { echo "missing $ROOT/edge.env (run bootstrap.sh first)" >&2; exit 1; }
+PROXY_NETWORK=$(sed -n 's/^PROXY_NETWORK=//p' "$ENV_FILE")
+PROXY_NETWORK=${PROXY_NETWORK:-web}
+docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1 || docker network create "$PROXY_NETWORK" >/dev/null
 
-docker network inspect edge >/dev/null 2>&1 || docker network create edge >/dev/null
-
-echo "==> Starting the HTTPS proxy"
-docker compose -f "$HERE/edge/docker-compose.yml" --env-file "$ROOT/edge.env" up -d
-docker compose -f "$HERE/edge/docker-compose.yml" --env-file "$ROOT/edge.env" exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null
+# Reuse an existing HTTPS proxy (e.g. one shared with other apps); start ours only on a bare server.
+if [ -z "$(docker ps -q --filter publish=443)" ]; then
+  echo "==> Starting the HTTPS proxy"
+  docker compose -f "$HERE/edge/docker-compose.yml" up -d
+fi
 
 echo "==> Building and starting tasker-$ENV_NAME"
 docker compose -f "$HERE/docker-compose.yml" --env-file "$ENV_FILE" up -d --build --remove-orphans --wait --wait-timeout 300
