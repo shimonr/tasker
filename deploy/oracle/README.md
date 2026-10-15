@@ -12,7 +12,6 @@ proxy for other apps (attached to the Docker network `web`), `deploy.sh` reuses 
  https://prod ──▶ │ Caddy :443 ─▶ tasker-prod: web ─▶ api ─▶ db │
  https://qa   ──▶ │            └▶ tasker-qa:   web ─▶ api ─▶ db │
                   └──────────────────────────────────────────┘
- failover:  Vercel (web) ─▶ Railway (api + db)   ◀── nightly copy of prod data
 ```
 
 ## One-time setup
@@ -51,7 +50,6 @@ proxy for other apps (attached to the Docker network `web`), `deploy.sh` reuses 
    | `ORACLE_USER` | SSH user (usually `ubuntu` or `opc`) |
    | `ORACLE_SSH_KEY` | Contents of the private key `tasker-deploy` |
    | `ORACLE_KNOWN_HOSTS` | Optional: output of `ssh-keyscan <ip>` (pins the host key) |
-   | `RAILWAY_DATABASE_URL` | Railway PostgreSQL *public* URL, for the failover sync |
 
    Optionally set an `APP_URL` **environment variable** in each GitHub environment (for example
    `https://tasks.example.com`) so the deploy job runs a smoke test.
@@ -65,21 +63,3 @@ proxy for other apps (attached to the Docker network `web`), `deploy.sh` reuses 
 - Change configuration: edit `/opt/tasker/<env>.env`, then re-run the workflow or `bash /opt/tasker/src/<env>/deploy/oracle/deploy.sh <env>`.
 - Backups: `/opt/tasker/backups/prod-*.sql.gz` (nightly, 14 days). Manual: `bash /opt/tasker/src/prod/deploy/oracle/backup.sh prod`.
 - Restore a backup: `gunzip -c <file> | docker exec -i tasker-prod-db-1 psql -U tasker -d tasker`.
-
-## Failover to Railway + Vercel
-
-The existing Railway (API) and Vercel (frontend) deployment keeps auto-deploying `master`. The
-*Failover database sync* workflow copies the Oracle prod database to Railway every night at 02:30 UTC.
-
-Railway variables to set once: `APP_ENV=failover`, `APP_BASE_URL=<your Vercel URL>`, `FRONTEND_ORIGIN=<your Vercel URL>`,
-`TASKER_SECRET_KEY` (32+ random characters), `BREVO_API_KEY`, `EMAIL_SENDER_ADDRESS`.
-
-**When Oracle is down:**
-1. Set the repository variable `FAILOVER_ACTIVE` to `true` (*Settings → Secrets and variables → Actions → Variables*)
-   so the nightly copy cannot overwrite what families do on Railway.
-2. Send the family to the Vercel URL. If you use your own domain, point it at Vercel instead.
-
-**When Oracle is back:**
-1. Run *Failover database sync* manually with direction **railway-to-oracle**. It backs up the Oracle
-   database first, then copies Railway's data over.
-2. Switch DNS/users back to Oracle and set `FAILOVER_ACTIVE` to `false`.

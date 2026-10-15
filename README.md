@@ -23,8 +23,7 @@ React + TypeScript (Vite, Tailwind) frontend and a FastAPI + SQLAlchemy backend.
 - `backend/` – FastAPI API (`app/`), tests (`tests/`, 100% line + branch coverage enforced)
 - `frontend/` – Vite React app (`src/`), tests next to the code (100% coverage enforced)
 - `deploy/oracle/` – production (prod + qa) on an Oracle Cloud Always Free VM → [deploy/oracle/README.md](deploy/oracle/README.md)
-- `railway.json`, `frontend/vercel.json` – the Railway + Vercel deployment, kept as a warm failover
-- `.github/workflows/` – CI/CD and the nightly failover database sync
+- `.github/workflows/ci-cd.yml` – tests on every push/PR, then deploys `master` → prod and `qa` → QA
 
 ## Local development
 
@@ -68,21 +67,20 @@ cd frontend && npm test         # Vitest, fails below 100% coverage
 | `ADMIN_EMAIL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Bootstrap admin. `ADMIN_PASSWORD` also works as a break-glass reset. |
 | `FRONTEND_ORIGIN` | Allowed CORS origin(s), comma separated (only needed when the frontend is on another domain). |
 | `APP_BASE_URL` | Public URL of the frontend, used in email links. |
-| `APP_ENV` | Shown by `/api/health` (`prod`, `qa`, `failover`, …). |
+| `APP_ENV` | Shown by `/api/health` (`prod`, `qa`, …). |
 | `BREVO_API_KEY` | Brevo API key (`xkeysib-…`, REST API) or SMTP key (`xsmtpsib-…`, sent via `smtp-relay.brevo.com`). Without it emails are logged and skipped. |
 | `BREVO_SMTP_LOGIN` | Only for SMTP keys: the SMTP login from Brevo (*SMTP & API → SMTP*). Defaults to `EMAIL_SENDER_ADDRESS`. |
 | `EMAIL_SENDER_ADDRESS`, `EMAIL_SENDER_NAME` | Sender; the address must be a verified sender in Brevo. |
 | `EMAIL_OVERRIDE_RECIPIENT` | Send every email to this address instead (use on QA). |
 
-Frontend build variable: `VITE_API_BASE_URL` – API base URL when the API is on another domain (Vercel → Railway).
+Frontend build variable: `VITE_API_BASE_URL` – API base URL when the API is on another domain.
 Defaults to same-origin `/api`.
 
 ## Deployment
 
-- **Primary – Oracle Cloud (prod + qa):** pushes to `master` deploy prod, pushes to `qa` deploy QA, after all
-  tests pass. One-time setup: [deploy/oracle/README.md](deploy/oracle/README.md).
-- **Failover – Railway (API) + Vercel (frontend):** unchanged; they keep auto-deploying `master`.
-  The “Failover database sync” workflow copies prod data to Railway nightly, so it can take over at any time.
+Oracle Cloud (prod + qa): pushes to `master` deploy prod and pushes to `qa` deploy QA, after all tests pass.
+One-time setup: [deploy/oracle/README.md](deploy/oracle/README.md). The old Railway + Vercel deployment is retired;
+`frontend/vercel.json` only turns off Vercel's automatic Git deployments.
 
 ## API overview
 

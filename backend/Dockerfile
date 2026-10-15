@@ -1,4 +1,4 @@
-# Build context is the repository root (used by Railway and deploy/oracle).
+# Build context is the repository root (used by docker-compose.yml and deploy/oracle).
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

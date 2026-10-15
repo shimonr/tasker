@@ -1,7 +1,6 @@
 name: CI/CD
 
 # Pushes to master deploy prod and pushes to qa deploy QA on the Oracle server.
-# Railway (API) and Vercel (frontend) keep auto-deploying master on their own as the failover.
 on:
   push:
     branches: [master, qa]
