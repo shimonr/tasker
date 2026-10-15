@@ -30,12 +30,14 @@ proxy for other apps (attached to the Docker network `web`), `deploy.sh` reuses 
    ```
 
    The generated admin passwords (user `admin`) are in `/opt/tasker/prod.env` and `qa.env`.
-4. **Brevo:** in Brevo create an API key (*SMTP & API → API keys*) and verify a sender address
-   (*Senders, domains & dedicated IPs*). Put them in `/opt/tasker/prod.env` and `/opt/tasker/qa.env`:
+4. **Brevo:** verify a sender address (*Senders, domains & dedicated IPs*) and create either an API key
+   (*SMTP & API → API keys*, `xkeysib-…`) or an SMTP key (*SMTP & API → SMTP*, `xsmtpsib-…`; sent through
+   `smtp-relay.brevo.com:587`). Put them in `/opt/tasker/prod.env` and `/opt/tasker/qa.env`:
 
    ```
-   BREVO_API_KEY=xkeysib-...
+   BREVO_API_KEY=xkeysib-...          # or xsmtpsib-...
    EMAIL_SENDER_ADDRESS=hello@your-domain.com
+   # BREVO_SMTP_LOGIN=...@smtp-brevo.com   # SMTP keys only, if the login is not the sender address
    ```
 
    On QA also set `EMAIL_OVERRIDE_RECIPIENT=you@example.com` so test emails never reach real people.

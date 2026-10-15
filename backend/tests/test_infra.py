@@ -1,4 +1,5 @@
 import logging
+import smtplib
 
 import httpx
 import pytest
@@ -200,6 +201,71 @@ def test_brevo_failure_is_logged_not_raised(brevo, caplog):
     with caplog.at_level(logging.ERROR, logger="tasker.mailer"):
         assert mailer.send_task_completed("mom@example.com", "Mom", "Dishes", "Kid") is False
     assert "failed" in caplog.text
+
+
+class FakeSMTP:
+    instances = []
+    fail_login = False
+
+    def __init__(self, host, port, timeout):
+        self.address, self.calls, self.sent = (host, port), [], []
+        FakeSMTP.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.calls.append("quit")
+
+    def starttls(self):
+        self.calls.append("starttls")
+
+    def login(self, user, password):
+        if FakeSMTP.fail_login:
+            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+        self.calls.append(("login", user, password))
+
+    def send_message(self, message):
+        self.sent.append(message)
+
+
+@pytest.fixture()
+def brevo_smtp(monkeypatch):
+    FakeSMTP.instances, FakeSMTP.fail_login = [], False
+    monkeypatch.setattr(mailer.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(mailer.httpx, "post", lambda *a, **k: pytest.fail("SMTP keys must not use the REST API"))
+    monkeypatch.setenv("BREVO_API_KEY", "xsmtpsib-secret")
+    monkeypatch.setenv("EMAIL_SENDER_ADDRESS", "hello@family.example")
+    monkeypatch.setenv("APP_BASE_URL", "https://tasks.example")
+    return FakeSMTP
+
+
+def test_smtp_key_sends_through_brevo_relay(brevo_smtp, monkeypatch):
+    monkeypatch.setenv("EMAIL_OVERRIDE_RECIPIENT", "qa@family.example")
+    assert mailer.send_task_assigned("kid@example.com", "Kid", "<b>Dishes</b>", "Mom") is True
+    [smtp] = brevo_smtp.instances
+    assert smtp.address == ("smtp-relay.brevo.com", 587)
+    # TLS must be negotiated before the key is sent; the login defaults to the sender address.
+    assert smtp.calls == ["starttls", ("login", "hello@family.example", "xsmtpsib-secret"), "quit"]
+    [message] = smtp.sent
+    assert message["From"] == "Family Task Adventure <hello@family.example>"
+    assert message["To"] == "qa@family.example"
+    assert message["Subject"] == "[for kid@example.com] New task: <b>Dishes</b> 🎯"
+    assert message["X-Mailin-Tag"] == "tasker, task-assigned"
+    html_part = message.get_body(("html",)).get_content()
+    assert "&lt;b&gt;Dishes&lt;/b&gt;" in html_part and "https://tasks.example/child" in html_part
+    assert "https://tasks.example/child" in message.get_body(("plain",)).get_content()
+
+    monkeypatch.setenv("BREVO_SMTP_LOGIN", "8a1b2c@smtp-brevo.com")
+    mailer.send_welcome("kid@example.com", "Kid", "child")
+    assert brevo_smtp.instances[1].calls[1] == ("login", "8a1b2c@smtp-brevo.com", "xsmtpsib-secret")
+
+
+def test_smtp_failure_is_logged_not_raised(brevo_smtp, caplog):
+    brevo_smtp.fail_login = True
+    with caplog.at_level(logging.ERROR, logger="tasker.mailer"):
+        assert mailer.send_task_completed("mom@example.com", "Mom", "Dishes", "Kid") is False
+    assert "failed" in caplog.text and brevo_smtp.instances[0].sent == []
 
 
 def test_app_endpoints_send_real_brevo_requests_in_background(client, db, brevo):

@@ -1,8 +1,10 @@
 """Transactional email through Brevo (https://developers.brevo.com/reference/sendtransacemail).
 
 Configuration (environment):
-  BREVO_API_KEY             Brevo API key. Without it emails are logged and skipped.
-  EMAIL_SENDER_ADDRESS      A sender address verified in Brevo (required with an API key).
+  BREVO_API_KEY             Brevo key. An API key (xkeysib-...) uses the REST API; an SMTP key (xsmtpsib-...)
+                            uses the smtp-relay.brevo.com relay. Without it emails are logged and skipped.
+  BREVO_SMTP_LOGIN          SMTP login shown in Brevo (SMTP & API > SMTP). Defaults to EMAIL_SENDER_ADDRESS.
+  EMAIL_SENDER_ADDRESS      A sender address verified in Brevo (required with a key).
   EMAIL_SENDER_NAME         Display name, default "Family Task Adventure".
   EMAIL_OVERRIDE_RECIPIENT  Send every email here instead (use on QA so real users get nothing).
   APP_BASE_URL              Public URL of the frontend, used for links in emails.
@@ -11,12 +13,17 @@ Configuration (environment):
 import html
 import logging
 import os
+import smtplib
+from email.message import EmailMessage
+from email.utils import formataddr
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger("tasker.mailer")
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+BREVO_SMTP_HOST = "smtp-relay.brevo.com"
+BREVO_SMTP_PORT = 587
 
 
 def app_base_url() -> str:
@@ -46,18 +53,35 @@ def send_email(to_email: str, to_name: Optional[str], subject: str, heading: str
     override = os.getenv("EMAIL_OVERRIDE_RECIPIENT")
     if override:
         subject = f"[for {to_email}] {subject}"
-    payload = {
-        "sender": {"email": sender, "name": os.getenv("EMAIL_SENDER_NAME", "Family Task Adventure")},
-        "to": [{"email": override or to_email, "name": to_name or to_email}],
-        "subject": subject,
-        "htmlContent": _render_html(heading, paragraphs, cta_label, cta_url),
-        "textContent": "\n\n".join([heading, *paragraphs, f"{cta_label}: {cta_url}"]),
-        "tags": ["tasker", tag],
-    }
+    sender_name = os.getenv("EMAIL_SENDER_NAME", "Family Task Adventure")
+    recipient = override or to_email
+    html_content = _render_html(heading, paragraphs, cta_label, cta_url)
+    text_content = "\n\n".join([heading, *paragraphs, f"{cta_label}: {cta_url}"])
     try:
-        response = httpx.post(BREVO_URL, json=payload, headers={"api-key": api_key, "accept": "application/json"}, timeout=10)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
+        if api_key.startswith("xsmtpsib-"):
+            message = EmailMessage()
+            message["From"] = formataddr((sender_name, sender))
+            message["To"] = recipient
+            message["Subject"] = subject
+            message["X-Mailin-Tag"] = f"tasker, {tag}"
+            message.set_content(text_content)
+            message.add_alternative(html_content, subtype="html")
+            with smtplib.SMTP(BREVO_SMTP_HOST, BREVO_SMTP_PORT, timeout=10) as smtp:
+                smtp.starttls()
+                smtp.login(os.getenv("BREVO_SMTP_LOGIN") or sender, api_key)
+                smtp.send_message(message)
+        else:
+            payload = {
+                "sender": {"email": sender, "name": sender_name},
+                "to": [{"email": recipient, "name": to_name or to_email}],
+                "subject": subject,
+                "htmlContent": html_content,
+                "textContent": text_content,
+                "tags": ["tasker", tag],
+            }
+            response = httpx.post(BREVO_URL, json=payload, headers={"api-key": api_key, "accept": "application/json"}, timeout=10)
+            response.raise_for_status()
+    except (httpx.HTTPError, OSError) as exc:  # smtplib errors are OSErrors
         logger.error("Brevo email %r to %s failed: %s", subject, to_email, exc)
         return False
     return True

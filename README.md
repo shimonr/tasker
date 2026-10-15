@@ -69,7 +69,8 @@ cd frontend && npm test         # Vitest, fails below 100% coverage
 | `FRONTEND_ORIGIN` | Allowed CORS origin(s), comma separated (only needed when the frontend is on another domain). |
 | `APP_BASE_URL` | Public URL of the frontend, used in email links. |
 | `APP_ENV` | Shown by `/api/health` (`prod`, `qa`, `failover`, …). |
-| `BREVO_API_KEY` | Brevo API key. Without it emails are logged and skipped. |
+| `BREVO_API_KEY` | Brevo API key (`xkeysib-…`, REST API) or SMTP key (`xsmtpsib-…`, sent via `smtp-relay.brevo.com`). Without it emails are logged and skipped. |
+| `BREVO_SMTP_LOGIN` | Only for SMTP keys: the SMTP login from Brevo (*SMTP & API → SMTP*). Defaults to `EMAIL_SENDER_ADDRESS`. |
 | `EMAIL_SENDER_ADDRESS`, `EMAIL_SENDER_NAME` | Sender; the address must be a verified sender in Brevo. |
 | `EMAIL_OVERRIDE_RECIPIENT` | Send every email to this address instead (use on QA). |
 
