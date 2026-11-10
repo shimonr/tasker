@@ -1,0 +1,15 @@
+services:
+  backend:
+    command: .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port "$PORT"
+    cwd: backend
+    # The Vite dev server proxies /api here by default.
+    port: 8000
+    health: /api/health
+    env:
+      ADMIN_PASSWORD: admin-dev-password
+  web:
+    command: npm run dev -- --host 0.0.0.0 --port "$PORT" --strictPort
+    cwd: frontend
+    portal:
+      title: Family Task Adventure
+      description: Sign in as admin / admin-dev-password.

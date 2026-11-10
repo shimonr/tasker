@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Amp orb portals serve the dev server from *.onamp.dev.
+    allowedHosts: ['.onamp.dev'],
     // The app calls same-origin /api; in development forward it to the FastAPI server.
     proxy: {
       '/api': process.env.VITE_PROXY_TARGET || 'http://localhost:8000',

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Starts the local PostgreSQL cluster used by backend tests; services do not survive snapshots.
+set -euo pipefail
+
+version="$(ls /etc/postgresql | sort -V | tail -1)"
+if ! pg_lsclusters -h | awk -v v="$version" '$1 == v && $2 == "main" && $4 == "online"' | grep -q .; then
+  sudo pg_ctlcluster "$version" main start
+fi
+pg_isready -q -h localhost -p 5432

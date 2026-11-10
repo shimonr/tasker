@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb: Python 3.12 backend venv, frontend node_modules, and a local
+# PostgreSQL for `TEST_DATABASE_URL` tests. Safe to rerun on a restored snapshot.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+step() {
+  local label="$1" start=$SECONDS
+  shift
+  echo "==> $label"
+  "$@"
+  echo "    $label took $((SECONDS - start))s"
+}
+
+install_postgres() {
+  if ! dpkg -s postgresql >/dev/null 2>&1; then
+    sudo apt-get update -q
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q postgresql
+  fi
+  local version conf
+  version="$(ls /etc/postgresql | sort -V | tail -1)"
+  conf="/etc/postgresql/$version/main/conf.d/zz-orb.conf"
+  # Ephemeral sandbox: trade durability for speed.
+  printf '%s\n' "fsync = off" "synchronous_commit = off" "full_page_writes = off" \
+    | sudo tee "$conf" >/dev/null
+  sudo pg_ctlcluster "$version" main start 2>/dev/null || sudo pg_ctlcluster "$version" main restart
+  sudo -u postgres psql -q -v ON_ERROR_STOP=1 <<'SQL'
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tasker') THEN
+    CREATE ROLE tasker LOGIN SUPERUSER PASSWORD 'tasker';
+  END IF;
+END $$;
+SQL
+  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'tasker_test'" | grep -q 1 \
+    || sudo -u postgres createdb -O tasker tasker_test
+  # Setup's processes do not survive into the snapshot; .agents/resume starts it again.
+  sudo pg_ctlcluster "$version" main stop
+}
+
+install_backend() {
+  uv python install 3.12
+  if [ ! -x backend/.venv/bin/python ] || ! backend/.venv/bin/python -c 'import sys; sys.exit(sys.version_info[:2] != (3, 12))'; then
+    uv venv --clear --python 3.12 backend/.venv
+  fi
+  uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt
+}
+
+install_frontend() {
+  # Reinstalls from the snapshot's warm npm cache in a few seconds.
+  (cd frontend && npm ci --no-audit --no-fund)
+}
+
+write_agent_notes() {
+  local notes="$HOME/.config/amp/AGENTS.md" marker="# Tasker orb notes"
+  mkdir -p "$(dirname "$notes")"
+  grep -Fqx "$marker" "$notes" 2>/dev/null && return 0
+  cat >>"$notes" <<EOF
+
+$marker
+
+- Backend venv (Python 3.12): \`$repo_root/backend/.venv\`. Run tests with \`cd backend && .venv/bin/pytest\`.
+- PostgreSQL tests: \`cd backend && TEST_DATABASE_URL=postgresql://tasker:tasker@localhost:5432/tasker_test .venv/bin/pytest --no-cov\`
+  (the local cluster is started by \`.agents/resume\`).
+- Frontend: \`cd frontend && npm test\` and \`npm run build\`; dependencies are already installed.
+- Dev servers: \`amp orb services ensure\` starts the backend and frontend from \`.amp/services.yaml\`;
+  sign in as \`admin\` / \`admin-dev-password\`.
+EOF
+}
+
+step "PostgreSQL" install_postgres
+step "Backend dependencies" install_backend
+step "Frontend dependencies" install_frontend
+step "Agent notes" write_agent_notes
