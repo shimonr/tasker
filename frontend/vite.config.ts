@@ -1,7 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
+// VITE_BASE_PATH serves the app under a sub-path, e.g. "/tasker" for https://example.com/tasker/.
+const basePath = process.env.VITE_BASE_PATH?.replace(/\/+$/, '')
+
 export default defineConfig({
+  base: basePath ? `${basePath}/` : '/',
   plugins: [react()],
   server: {
     port: 5173,

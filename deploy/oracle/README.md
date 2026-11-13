@@ -56,6 +56,19 @@ proxy for other apps (attached to the Docker network `web`), `deploy.sh` reuses 
 6. **Deploy:** push to `master` (prod) or create and push a `qa` branch (QA). The *CI/CD* workflow runs all
    tests, uploads the code and runs `deploy.sh` on the server.
 
+## Serving on a shared domain (e.g. https://shimonr.com/tasker/)
+
+Add these lines to the environment's env file and deploy again:
+
+```
+PUBLIC_HOST=shimonr.com
+BASE_PATH=/tasker
+```
+
+`deploy.sh` then also loads `docker-compose.public.yml`: the frontend is built for `/tasker/`, the shared proxy
+routes `shimonr.com/tasker/*` to this environment (stripping the prefix, like the other apps on the domain), email
+links use `https://shimonr.com/tasker`, and the `APP_DOMAIN` name redirects there. Point the domain's DNS at the server first.
+
 ## Day to day
 
 - Promote to QA: `git push origin HEAD:qa`. Release to prod: merge to `master`.

@@ -43,7 +43,10 @@ services:
     networks: [internal]
 
   web:
-    build: ../../frontend
+    build:
+      context: ../../frontend
+      args:
+        VITE_BASE_PATH: ${BASE_PATH:-}
     restart: unless-stopped
     depends_on:
       backend:

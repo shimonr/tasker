@@ -75,6 +75,7 @@ cd frontend && npm test         # Vitest, fails below 100% coverage
 
 Frontend build variable: `VITE_API_BASE_URL` – API base URL when the API is on another domain.
 Defaults to same-origin `/api`.
+`VITE_BASE_PATH` – serve the app under a sub-path such as `/tasker` (prod runs at https://shimonr.com/tasker/).
 
 ## Deployment
 

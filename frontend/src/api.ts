@@ -12,9 +12,9 @@ import type {
   UserUpdate,
 } from './types'
 
-// Same-origin "/api" by default (nginx or the Vite dev proxy forwards it to the backend).
+// Same-origin "<base path>/api" by default (nginx or the Vite dev proxy forwards it to the backend).
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || `${import.meta.env.BASE_URL}api`,
   timeout: 15000,
 })
 

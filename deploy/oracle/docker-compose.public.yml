@@ -1,0 +1,16 @@
+# Added by deploy.sh when the env file sets PUBLIC_HOST: serves the app at https://${PUBLIC_HOST}${BASE_PATH}/
+# (e.g. https://shimonr.com/tasker/) next to other apps on the same domain, and redirects the APP_DOMAIN name there.
+services:
+  backend:
+    environment:
+      APP_BASE_URL: https://${PUBLIC_HOST}${BASE_PATH:-}
+      FRONTEND_ORIGIN: https://${PUBLIC_HOST}
+
+  web:
+    labels:
+      caddy.redir: https://${PUBLIC_HOST}${BASE_PATH:-}{uri} permanent
+      caddy_1: ${PUBLIC_HOST}
+      # handle_path strips the prefix, so nginx serves the app as if it were at the root.
+      caddy_1.handle_path: ${BASE_PATH:?BASE_PATH is required with PUBLIC_HOST}/*
+      caddy_1.handle_path.reverse_proxy: '{{upstreams 80}}'
+      caddy_1.redir: ${BASE_PATH} ${BASE_PATH}/ 308

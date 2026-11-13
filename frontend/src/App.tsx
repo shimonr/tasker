@@ -70,7 +70,7 @@ export default function App() {
   const publicPage = (element: JSX.Element) => (user ? <Navigate to={homeFor(user.role)} replace /> : element)
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <Decorations />
       <Routes>
         <Route path="/login" element={publicPage(<LoginPage onLogin={handleLogin} />)} />

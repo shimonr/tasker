@@ -24,8 +24,12 @@ if [ -z "$(docker ps -q --filter publish=443)" ]; then
   docker compose -f "$HERE/edge/docker-compose.yml" up -d
 fi
 
+COMPOSE=(docker compose -f "$HERE/docker-compose.yml")
+# PUBLIC_HOST (+ BASE_PATH) also serves the app on a shared domain, e.g. https://shimonr.com/tasker/.
+if grep -q '^PUBLIC_HOST=.' "$ENV_FILE"; then COMPOSE+=(-f "$HERE/docker-compose.public.yml"); fi
+
 echo "==> Building and starting tasker-$ENV_NAME"
-docker compose -f "$HERE/docker-compose.yml" --env-file "$ENV_FILE" up -d --build --remove-orphans --wait --wait-timeout 300
+"${COMPOSE[@]}" --env-file "$ENV_FILE" up -d --build --remove-orphans --wait --wait-timeout 300
 
 echo "==> Health check"
 docker exec "tasker-$ENV_NAME-web-1" wget -qO- http://127.0.0.1/api/health
