@@ -3,7 +3,7 @@
 A cheerful family chore app: parents create tasks, kids complete them and collect stars ⭐, admins manage the family.
 React + TypeScript (Vite, Tailwind) frontend and a FastAPI + SQLAlchemy backend.
 
-- Release: **0.4**
+- Release: **0.5**
 
 ## Features
 
