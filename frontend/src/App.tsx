@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage'
 import ParentDashboard from './pages/ParentDashboard'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import SignupPage from './pages/SignupPage'
+import VerifyEmailPage from './pages/VerifyEmailPage'
 
 export const TOKEN_KEY = 'tasker_token'
 
@@ -49,10 +50,15 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [handleLogout])
 
-  /** Store a fresh token and load the signed-in user. Used by login, sign-up and join. */
-  const startSession = async (accessToken: string) => {
+  /** Keep a fresh token for this browser, so the next visit and every API call use it. */
+  const storeToken = (accessToken: string) => {
     localStorage.setItem(TOKEN_KEY, accessToken)
     setAuthToken(accessToken)
+  }
+
+  /** Store a fresh token and load the signed-in user. Used by login. */
+  const startSession = async (accessToken: string) => {
+    storeToken(accessToken)
     setUser(await getMe())
   }
 
@@ -73,7 +79,7 @@ export default function App() {
     if (user?.role !== role) return <Navigate to={user ? homeFor(user.role) : '/login'} replace />
     const props = { user, onLogout: handleLogout }
     return {
-      admin: <AdminPage {...props} />,
+      admin: <AdminPage {...props} onNewToken={storeToken} />,
       parent: <ParentDashboard {...props} />,
       child: <ChildDashboard {...props} onUserChange={setUser} />,
     }[role]
@@ -85,10 +91,11 @@ export default function App() {
       <Decorations />
       <Routes>
         <Route path="/login" element={publicPage(<LoginPage onLogin={handleLogin} />)} />
-        <Route path="/signup" element={publicPage(<SignupPage onSignedIn={startSession} />)} />
-        <Route path="/join" element={publicPage(<JoinPage onSignedIn={startSession} />)} />
+        <Route path="/signup" element={publicPage(<SignupPage />)} />
+        <Route path="/join" element={publicPage(<JoinPage />)} />
         <Route path="/forgot-password" element={publicPage(<ForgotPasswordPage />)} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/parent" element={page('parent')} />
         <Route path="/child" element={page('child')} />
         <Route path="/admin" element={page('admin')} />

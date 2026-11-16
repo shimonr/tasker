@@ -38,6 +38,10 @@ def create_access_token(user_id: int, role: str, token_version: int) -> str:
     return _encode(user_id, token_version, "access", timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES), {"role": role})
 
 
+def create_verify_token(user_id: int, token_version: int) -> str:
+    return _encode(user_id, token_version, "verify", timedelta(days=3))
+
+
 def create_reset_token(user_id: int, token_version: int) -> str:
     return _encode(user_id, token_version, "reset", timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES))
 
@@ -90,3 +94,4 @@ login_limiter = RateLimiter(max_attempts=10, window_seconds=15 * 60)
 password_reset_limiter = RateLimiter(max_attempts=3, window_seconds=60 * 60)
 # New families are rare; cap sign-ups for the whole app so the public form cannot be used to flood the database.
 signup_limiter = RateLimiter(max_attempts=10, window_seconds=60 * 60)
+verification_limiter = RateLimiter(max_attempts=5, window_seconds=60 * 60)

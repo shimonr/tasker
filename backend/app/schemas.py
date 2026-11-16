@@ -162,6 +162,19 @@ class ResetPasswordRequest(BaseModel):
     new_password: Password
 
 
+class EmailRequest(BaseModel):
+    email: EmailStr
+
+
+class TokenRequest(BaseModel):
+    token: str
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: Password
+
+
 class ChildRef(BaseModel):
     child_id: int
 

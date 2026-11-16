@@ -46,6 +46,9 @@ describe('api client', () => {
       [() => client.completeOccurrence(7), 'post', '/occurrences/7/complete'],
       [() => client.signup({ family_name: 'F', full_name: 'P', email: 'a@b.c', password: 'pw' }), 'post', '/auth/signup', { family_name: 'F', full_name: 'P', email: 'a@b.c', password: 'pw' }],
       [() => client.joinFamily({ invite_code: 'X1', role: 'child', full_name: 'K', email: 'a@b.c', password: 'pw' }), 'post', '/auth/join', { invite_code: 'X1', role: 'child', full_name: 'K', email: 'a@b.c', password: 'pw' }],
+      [() => client.verifyEmail('tok'), 'post', '/auth/verify-email', { token: 'tok' }],
+      [() => client.resendVerification('a@b.c'), 'post', '/auth/resend-verification', { email: 'a@b.c' }],
+      [() => client.changePassword('old', 'new-pw'), 'post', '/me/password', { current_password: 'old', new_password: 'new-pw' }],
       [() => client.updateProfile({ avatar: '🦄', color: '#123456' }), 'put', '/me/profile', { avatar: '🦄', color: '#123456' }],
       [() => client.fetchFamily(), 'get', '/family'],
       [() => client.createInviteCode(), 'post', '/family/invite-code'],
@@ -100,12 +103,14 @@ describe('api client', () => {
     await expect(client.fetchUsers()).rejects.toThrow('Email address or username has already been used.')
     reply = { status: 400, data: { detail: 'Nope' } }
     await expect(client.fetchUsers()).rejects.toThrow('Nope')
+    await expect(client.fetchUsers()).rejects.toMatchObject({ status: 400 })
     reply = { status: 422, data: { detail: [{ loc: ['body', 'password'], msg: 'too short' }, { loc: ['body', 'email'], msg: 'bad' }] } }
     await expect(client.fetchUsers()).rejects.toThrow('password: too short email: bad')
     reply = { status: 500, data: 'oops' }
     await expect(client.fetchUsers()).rejects.toThrow('Something went wrong. Please try again.')
     reply = 'network'
     await expect(client.fetchUsers()).rejects.toThrow("Can't reach the server")
+    await expect(client.fetchUsers()).rejects.toMatchObject({ status: undefined })
     expect(client.messageFrom(new Error('plain'))).toBe('Something went wrong. Please try again.')
   })
 

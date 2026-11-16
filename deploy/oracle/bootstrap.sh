@@ -78,6 +78,7 @@ chown -R "$DEPLOY_USER": "$ROOT"
 
 echo "==> Nightly prod database backup at 03:15 UTC"
 echo "15 3 * * * $DEPLOY_USER bash $ROOT/src/prod/deploy/oracle/backup.sh prod >/dev/null 2>&1" >/etc/cron.d/tasker-backup
+echo "30 3 * * * $DEPLOY_USER [ -f $ROOT/offsite.env ] && bash $ROOT/src/prod/deploy/oracle/offsite-backup.sh prod >/dev/null 2>&1" >>/etc/cron.d/tasker-backup
 echo "==> Hourly chore reminders"
 echo "5 * * * * $DEPLOY_USER bash $ROOT/src/prod/deploy/oracle/reminders.sh prod >/dev/null 2>&1" >/etc/cron.d/tasker-reminders
 echo "35 * * * * $DEPLOY_USER bash $ROOT/src/qa/deploy/oracle/reminders.sh qa >/dev/null 2>&1" >>/etc/cron.d/tasker-reminders

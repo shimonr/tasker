@@ -54,6 +54,8 @@ class User(Base):
     role = Column(Enum(UserRole), nullable=False, default=UserRole.child)
     # Bumped on every password change so older tokens stop working.
     token_version = Column(Integer, nullable=False, default=0)
+    # Self-signed-up accounts must open the link we email before they can sign in.
+    email_verified = Column(Boolean, nullable=False, default=True)
     family_id = Column(Integer, ForeignKey("families.id"), nullable=True, index=True)
     avatar = Column(String(8), nullable=True)
     color = Column(String(7), nullable=True)

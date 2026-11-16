@@ -4,6 +4,7 @@ import type {
   FamilySummary,
   FamilyView,
   JoinInput,
+  Message,
   NewChild,
   NewUser,
   Occurrence,
@@ -44,6 +45,11 @@ export const setAuthToken = (token: string | null) => {
   }
 }
 
+/** An API failure: the friendly message, plus the HTTP status when the server replied. */
+export interface ApiError extends Error {
+  status?: number
+}
+
 interface ValidationIssue {
   loc: (string | number)[]
   msg: string
@@ -68,7 +74,9 @@ api.interceptors.response.use(
     if (axios.isAxiosError(error) && error.response?.status === 401 && error.config?.url !== '/token') {
       onUnauthorized()
     }
-    return Promise.reject(new Error(messageFrom(error)))
+    const failure: ApiError = new Error(messageFrom(error))
+    failure.status = error.response?.status
+    return Promise.reject(failure)
   },
 )
 
@@ -80,8 +88,12 @@ export const forgotPassword = (email: string) => data<{ message: string }>(api.p
 export const resetPasswordWithToken = (token: string, newPassword: string) =>
   data<{ message: string }>(api.post('/auth/reset-password', { token, new_password: newPassword }))
 export const getMe = () => data<User>(api.get('/me'))
-export const signup = (input: SignupInput) => data<Token>(api.post('/auth/signup', input))
-export const joinFamily = (input: JoinInput) => data<Token>(api.post('/auth/join', input))
+export const signup = (input: SignupInput) => data<Message>(api.post('/auth/signup', input))
+export const joinFamily = (input: JoinInput) => data<Message>(api.post('/auth/join', input))
+export const verifyEmail = (token: string) => data<Message>(api.post('/auth/verify-email', { token }))
+export const resendVerification = (email: string) => data<Message>(api.post('/auth/resend-verification', { email }))
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  data<Token>(api.post('/me/password', { current_password: currentPassword, new_password: newPassword }))
 export const updateProfile = (profile: ProfileUpdate) => data<User>(api.put('/me/profile', profile))
 
 export const fetchUsers = () => data<User[]>(api.get('/admin/users'))

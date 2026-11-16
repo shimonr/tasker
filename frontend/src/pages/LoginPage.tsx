@@ -1,16 +1,22 @@
 import { FormEvent, useState } from 'react'
 import { Link } from 'react-router-dom'
+import type { ApiError } from '../api'
 import AuthLayout from '../components/AuthLayout'
+import ResendVerification from '../components/ResendVerification'
 
 interface LoginPageProps {
   onLogin: (username: string, password: string) => Promise<unknown>
 }
+
+const NOT_CONFIRMED = /confirm your email/i
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [unconfirmed, setUnconfirmed] = useState(false)
+  const [resending, setResending] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -20,7 +26,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     try {
       await onLogin(username, password)
     } catch (err) {
-      setError((err as Error).message)
+      const failure = err as ApiError
+      setError(failure.message)
+      setUnconfirmed(failure.status === 403 && NOT_CONFIRMED.test(failure.message))
       setLoading(false)
     }
   }
@@ -80,6 +88,16 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           </Link>
         </p>
       </form>
+      {unconfirmed &&
+        (resending ? (
+          <div className="mt-4">
+            <ResendVerification initialEmail={username} />
+          </div>
+        ) : (
+          <button type="button" onClick={() => setResending(true)} className="btn-sunny mt-4 w-full">
+            📨 Send me a new link
+          </button>
+        ))}
       <p className="mt-4 text-center text-grape-700">
         New here?{' '}
         <Link to="/signup" className="font-semibold text-grape-600 underline decoration-wavy decoration-bubble-400 underline-offset-4">

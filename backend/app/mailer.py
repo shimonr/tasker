@@ -142,6 +142,19 @@ def send_task_completed(email: str, name: Optional[str], task_title: str, child_
     )
 
 
+def send_verification(email: str, name: Optional[str], token: str) -> bool:
+    return send_email(
+        email,
+        name,
+        "Confirm your email for Family Task Adventure ✉️",
+        f"Almost there, {name or email}!",
+        ["Tap the button to confirm your email address. The link works for three days."],
+        "Confirm my email",
+        f"{app_base_url()}/verify-email?token={token}",
+        "verify-email",
+    )
+
+
 def send_approval_request(email: str, name: Optional[str], child_name: str, task_title: str) -> bool:
     return send_email(
         email,

@@ -35,6 +35,7 @@ def fresh_state(monkeypatch):
     auth.login_limiter.clear()
     auth.password_reset_limiter.clear()
     auth.signup_limiter.clear()
+    auth.verification_limiter.clear()
     yield
     # Empty every table (keeping the schema) so tests stay independent.
     with engine.begin() as conn:
@@ -60,7 +61,7 @@ def client():
 def sent_emails(monkeypatch):
     """Capture emails instead of calling Brevo."""
     sent = []
-    for name in ("send_welcome", "send_password_reset", "send_task_assigned", "send_task_completed", "send_approval_request", "send_reminder"):
+    for name in ("send_welcome", "send_password_reset", "send_task_assigned", "send_task_completed", "send_approval_request", "send_reminder", "send_verification"):
         monkeypatch.setattr(main.mailer, name, lambda *args, _name=name: sent.append((_name, args)))
     return sent
 

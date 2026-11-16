@@ -40,6 +40,8 @@ ADDED_COLUMNS = [
     ("task_assignments", "reminded_at", "TIMESTAMP WITH TIME ZONE"),
     ("task_occurrences", "awaiting_approval", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("task_occurrences", "reminded_at", "TIMESTAMP WITH TIME ZONE"),
+    # Accounts that existed before email confirmation are treated as confirmed.
+    ("users", "email_verified", "BOOLEAN NOT NULL DEFAULT TRUE"),
 ]
 
 

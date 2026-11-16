@@ -35,6 +35,10 @@ export interface JoinInput {
   password: string
 }
 
+export interface Message {
+  message: string
+}
+
 export interface FamilyView {
   id: number
   name: string

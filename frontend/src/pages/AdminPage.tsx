@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
-import { createUser, deleteUser, fetchAdminFamilies, fetchUsers, resetPassword, updateUser } from '../api'
+import { changePassword, createUser, deleteUser, fetchAdminFamilies, fetchUsers, resetPassword, updateUser } from '../api'
 import type { FamilySummary, User, UserRole } from '../types'
+import FormField from '../components/FormField'
 import Modal from '../components/Modal'
 import Navbar from '../components/Navbar'
 import { useToast } from '../components/Toast'
@@ -9,6 +10,7 @@ import { avatarFor, userName } from '../lib/tasks'
 interface AdminPageProps {
   user: User
   onLogout: () => void
+  onNewToken: (accessToken: string) => void
 }
 
 const ROLES: { value: UserRole; label: string }[] = [
@@ -18,13 +20,15 @@ const ROLES: { value: UserRole; label: string }[] = [
 ]
 const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.value, r.label])) as Record<UserRole, string>
 const emptyAccount = { username: '', email: '', full_name: '', role: 'parent' as UserRole, password: '', family_id: '' }
+const blankPasswords = { current: '', next: '', repeat: '' }
 
-export default function AdminPage({ user, onLogout }: AdminPageProps) {
+export default function AdminPage({ user, onLogout, onNewToken }: AdminPageProps) {
   const [users, setUsers] = useState<User[]>([])
   const [families, setFamilies] = useState<FamilySummary[]>([])
   const [account, setAccount] = useState(emptyAccount)
   const [resetEmail, setResetEmail] = useState('')
   const [resetValue, setResetValue] = useState('')
+  const [passwords, setPasswords] = useState(blankPasswords)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [draft, setDraft] = useState({ username: '', email: '', full_name: '', role: 'parent' as UserRole })
   const [deleting, setDeleting] = useState<User | null>(null)
@@ -57,6 +61,17 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
       await resetPassword(resetEmail, resetValue)
       setResetValue('')
     }, 'Password updated. Old sessions were signed out.')
+  }
+
+  const handleChangePassword = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    return attempt(async () => {
+      if (passwords.next !== passwords.repeat) throw new Error("The new passwords don't match.")
+      if (passwords.next.length < 8) throw new Error('Your new password needs 8+ characters.')
+      const { access_token } = await changePassword(passwords.current, passwords.next)
+      onNewToken(access_token)
+      setPasswords(blankPasswords)
+    }, 'Password changed! Your other devices were signed out.')
   }
 
   const startEdit = (target: User) => {
@@ -155,6 +170,44 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
           </button>
         </form>
       </section>
+
+      <form className="card mt-6 space-y-3 border-sunny-300 lg:max-w-xl" onSubmit={handleChangePassword} aria-label="Change my password">
+        <h2 className="text-2xl text-grape-900">🔐 Change my password</h2>
+        <FormField
+          id="my-current-password"
+          type="password"
+          label="Current password"
+          autoComplete="current-password"
+          required
+          value={passwords.current}
+          onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
+        />
+        <FormField
+          id="my-new-password"
+          type="password"
+          label="New password"
+          autoComplete="new-password"
+          minLength={8}
+          maxLength={128}
+          required
+          value={passwords.next}
+          onChange={(e) => setPasswords({ ...passwords, next: e.target.value })}
+        />
+        <FormField
+          id="my-repeat-password"
+          type="password"
+          label="Repeat new password"
+          autoComplete="new-password"
+          minLength={8}
+          maxLength={128}
+          required
+          value={passwords.repeat}
+          onChange={(e) => setPasswords({ ...passwords, repeat: e.target.value })}
+        />
+        <button type="submit" className="btn-sunny w-full">
+          💾 Change password
+        </button>
+      </form>
 
       <section className="card mt-6 border-grape-100">
         <h2 className="text-2xl text-grape-900">👨‍👩‍👧‍👦 Everyone ({users.length})</h2>

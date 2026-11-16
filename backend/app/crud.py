@@ -81,6 +81,7 @@ def add_user(
     family_id: Optional[int] = None,
     avatar: Optional[str] = None,
     color: Optional[str] = None,
+    email_verified: bool = True,
 ) -> models.User:
     user = models.User(
         email=email,
@@ -92,6 +93,7 @@ def add_user(
         family_id=family_id,
         avatar=avatar,
         color=color,
+        email_verified=email_verified,
     )
     db.add(user)
     db.commit()

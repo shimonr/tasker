@@ -76,3 +76,19 @@ links use `https://shimonr.com/tasker`, and the `APP_DOMAIN` name redirects ther
 - Change configuration: edit `/opt/tasker/<env>.env`, then re-run the workflow or `bash /opt/tasker/src/<env>/deploy/oracle/deploy.sh <env>`.
 - Backups: `/opt/tasker/backups/prod-*.sql.gz` (nightly, 14 days). Manual: `bash /opt/tasker/src/prod/deploy/oracle/backup.sh prod`.
 - Restore a backup: `gunzip -c <file> | docker exec -i tasker-prod-db-1 psql -U tasker -d tasker`.
+
+## Off-site backups (Oracle Object Storage)
+
+`offsite-backup.sh` copies the newest nightly dump to a bucket and keeps 14 days there. It runs at 03:30 UTC
+once `/opt/tasker/offsite.env` exists (the file holds rclone settings for the `oci` remote; see the script header).
+Setup in the Oracle console (home region):
+
+1. *Storage → Buckets → Create bucket* named `family-chores-prod` (Standard tier).
+2. *Identity & Security → Users → your user → Customer secret keys → Generate secret key*. Copy the access key and
+   secret right away; the secret is shown only once.
+3. Your namespace is shown under *Storage → Object Storage → Bucket details* (or *Tenancy details*).
+
+Then on the server, create `/opt/tasker/offsite.env` (chmod 600) with `BACKUP_BUCKET`, `RCLONE_CONFIG_OCI_ENDPOINT`
+(`https://<namespace>.compat.objectstorage.<region>.oraclecloud.com`), `RCLONE_CONFIG_OCI_ACCESS_KEY_ID` and
+`RCLONE_CONFIG_OCI_SECRET_ACCESS_KEY`, and run `bash /opt/tasker/src/prod/deploy/oracle/offsite-backup.sh prod` once.
+

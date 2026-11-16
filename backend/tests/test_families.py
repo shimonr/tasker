@@ -10,6 +10,13 @@ def bearer(response) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def activate(client, sent_emails, email: str, password: str = "long-enough") -> dict[str, str]:
+    """Open the confirmation link we emailed to `email`, then sign in."""
+    token = next(args[2] for name, args in reversed(sent_emails) if name == "send_verification" and args[0] == email)
+    assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 200
+    return login(client, email, password)
+
+
 def signup(client, **fields):
     body = {"family_name": "Rivera", "full_name": "Maria", "email": "maria@example.com", "password": "long-enough", **fields}
     return client.post("/api/auth/signup", json=body)
@@ -36,13 +43,16 @@ def admin_h(db, client):
 def test_signup_creates_a_family_and_its_first_parent(client, sent_emails):
     response = signup(client, username="maria")
     assert response.status_code == 200, response.text
-    headers = bearer(response)
+    assert response.json()["message"] == "We sent a link to maria@example.com. Open it to finish signing up."
+    assert "access_token" not in response.json()
+    assert [(name, args[:2]) for name, args in sent_emails] == [("send_verification", ("maria@example.com", "Maria"))]
+    headers = activate(client, sent_emails, "maria@example.com")
     me = client.get("/api/me", headers=headers).json()
     assert (me["role"], me["family_name"], me["username"]) == ("parent", "Rivera", "maria")
     family = client.get("/api/family", headers=headers).json()
     assert family["name"] == "Rivera" and family["invite_code"]
     assert [m["email"] for m in family["members"]] == ["maria@example.com"]
-    assert sent_emails == [("send_welcome", ("maria@example.com", "Maria", "parent"))]
+    assert sent_emails[-1] == ("send_welcome", ("maria@example.com", "Maria", "parent"))
 
 
 def test_signup_rejects_taken_identities_and_bad_input(client, db):
@@ -60,21 +70,25 @@ def test_signup_is_rate_limited_for_the_whole_app(client):
     assert signup(client, email="late@example.com").status_code == 429
 
 
-def test_join_adds_kids_and_parents_to_the_family(client):
-    headers = bearer(signup(client))
+def test_join_adds_kids_and_parents_to_the_family(client, sent_emails):
+    signup(client)
+    headers = activate(client, sent_emails, "maria@example.com")
     code = invite_code_of(client, headers)
     kid = join(client, code)
     assert kid.status_code == 200, kid.text
-    kid_me = client.get("/api/me", headers=bearer(kid)).json()
+    kid_headers = activate(client, sent_emails, "ted@example.com")
+    kid_me = client.get("/api/me", headers=kid_headers).json()
     assert (kid_me["role"], kid_me["family_name"]) == ("child", "Rivera")
     dad = join(client, code, role="parent", email="dad@example.com", full_name="Dad")
     assert dad.status_code == 200
+    activate(client, sent_emails, "dad@example.com")
     members = {m["full_name"] for m in client.get("/api/family", headers=headers).json()["members"]}
     assert members == {"Maria", "Ted", "Dad"}
 
 
-def test_join_rejects_unknown_codes_taken_identities_and_blank_codes(client, db):
-    headers = bearer(signup(client))
+def test_join_rejects_unknown_codes_taken_identities_and_blank_codes(client, db, sent_emails):
+    signup(client)
+    headers = activate(client, sent_emails, "maria@example.com")
     bad = join(client, "no-such-code")
     assert bad.status_code == 400 and bad.json()["detail"] == "This invite code is not valid."
     assert join(client, "   ").status_code == 422

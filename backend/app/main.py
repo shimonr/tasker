@@ -207,10 +207,12 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
         auth.login_limiter.hit(key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect user or password")
     auth.login_limiter.reset(key)
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="Please confirm your email first. Check your inbox for the link.")
     return token_for(user)
 
 
-@app.post("/api/auth/signup", response_model=schemas.Token)
+@app.post("/api/auth/signup", response_model=schemas.Message)
 def signup(body: schemas.SignupRequest, background: BackgroundTasks, db: Session = Depends(deps.get_db)):
     if auth.signup_limiter.is_blocked("global"):
         raise HTTPException(status_code=429, detail="Too many new families right now. Please try again later.")
@@ -226,12 +228,13 @@ def signup(body: schemas.SignupRequest, background: BackgroundTasks, db: Session
         password=body.password,
         role=models.UserRole.parent,
         family_id=family.id,
+        email_verified=False,
     )
-    background.add_task(mailer.send_welcome, user.email, user.full_name, "parent")
-    return token_for(user)
+    background.add_task(mailer.send_verification, user.email, user.full_name, auth.create_verify_token(user.id, user.token_version))
+    return {"message": f"We sent a link to {user.email}. Open it to finish signing up."}
 
 
-@app.post("/api/auth/join", response_model=schemas.Token)
+@app.post("/api/auth/join", response_model=schemas.Message)
 def join_family(body: schemas.JoinRequest, background: BackgroundTasks, db: Session = Depends(deps.get_db)):
     family = crud.get_family_by_code(db, body.invite_code)
     if family is None:
@@ -246,9 +249,10 @@ def join_family(body: schemas.JoinRequest, background: BackgroundTasks, db: Sess
         password=body.password,
         role=models.UserRole(body.role),
         family_id=family.id,
+        email_verified=False,
     )
-    background.add_task(mailer.send_welcome, user.email, user.full_name, user.role.value)
-    return token_for(user)
+    background.add_task(mailer.send_verification, user.email, user.full_name, auth.create_verify_token(user.id, user.token_version))
+    return {"message": f"We sent a link to {user.email}. Open it to finish signing up."}
 
 
 @app.post("/api/auth/forgot-password", response_model=schemas.Message)
@@ -273,13 +277,52 @@ def reset_password_with_token(body: schemas.ResetPasswordRequest, db: Session = 
         raise invalid
     if user is None or payload.get("ver") != user.token_version:
         raise invalid
+    # Following the reset link proves the person owns the inbox.
+    user.email_verified = True
     crud.set_password(db, user, body.new_password)
     return {"message": "Password updated. You can sign in now."}
+
+
+@app.post("/api/auth/verify-email", response_model=schemas.Message)
+def verify_email(body: schemas.TokenRequest, background: BackgroundTasks, db: Session = Depends(deps.get_db)):
+    invalid = HTTPException(status_code=400, detail="This link is invalid or has expired.")
+    try:
+        payload = auth.decode_token(body.token, "verify")
+        user = crud.get_user(db, int(payload["sub"]))
+    except (jwt.PyJWTError, KeyError, ValueError):
+        raise invalid
+    if user is None or payload.get("ver") != user.token_version:
+        raise invalid
+    if not user.email_verified:
+        user.email_verified = True
+        db.commit()
+        background.add_task(mailer.send_welcome, user.email, user.full_name, user.role.value)
+    return {"message": "Your email is confirmed. You can sign in now."}
+
+
+@app.post("/api/auth/resend-verification", response_model=schemas.Message)
+def resend_verification(body: schemas.EmailRequest, background: BackgroundTasks, db: Session = Depends(deps.get_db)):
+    key = body.email.lower()
+    user = crud.get_user_by_email(db, body.email)
+    if user and not user.email_verified and not auth.verification_limiter.is_blocked(key):
+        auth.verification_limiter.hit(key)
+        background.add_task(mailer.send_verification, user.email, user.full_name, auth.create_verify_token(user.id, user.token_version))
+    # Same answer either way so the endpoint cannot be used to discover accounts.
+    return {"message": "If that account needs confirming, a new link is on its way."}
 
 
 @app.get("/api/me", response_model=schemas.UserRead)
 def read_current_user(current_user: models.User = Depends(deps.get_current_user)):
     return current_user
+
+
+@app.post("/api/me/password", response_model=schemas.Token)
+def change_password(body: schemas.PasswordChange, current_user: models.User = Depends(deps.get_current_user), db: Session = Depends(deps.get_db)):
+    if not auth.verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Your current password is not right.")
+    crud.set_password(db, current_user, body.new_password)
+    # Older sessions stop working; hand back a fresh token so this browser stays signed in.
+    return token_for(current_user)
 
 
 @app.put("/api/me/profile", response_model=schemas.UserRead)

@@ -1,10 +1,11 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createUser, deleteUser, fetchAdminFamilies, fetchUsers, resetPassword, updateUser } from '../api'
+import { changePassword, createUser, deleteUser, fetchAdminFamilies, fetchUsers, resetPassword, updateUser } from '../api'
 import AdminPage from './AdminPage'
 import { admin, leo, mia } from '../test/fixtures'
 
 vi.mock('../api', () => ({
+  changePassword: vi.fn(),
   createUser: vi.fn(),
   deleteUser: vi.fn(),
   fetchAdminFamilies: vi.fn(),
@@ -13,8 +14,10 @@ vi.mock('../api', () => ({
   updateUser: vi.fn(),
 }))
 
+const onNewToken = vi.fn()
+
 const renderPage = async () => {
-  render(<AdminPage user={admin} onLogout={vi.fn()} />)
+  render(<AdminPage user={admin} onLogout={vi.fn()} onNewToken={onNewToken} />)
   await screen.findByText('mia@example.com')
 }
 
@@ -93,6 +96,54 @@ describe('AdminPage', () => {
     expect(resetPassword).toHaveBeenCalledWith('leo@example.com', 'brand-new-pass')
     expect(await screen.findByRole('status')).toHaveTextContent('Password updated')
     expect(within(form).getByLabelText('New password')).toHaveValue('')
+  })
+
+  it('changes my own password and keeps this browser signed in with the fresh token', async () => {
+    vi.mocked(changePassword).mockResolvedValue({ access_token: 'fresh', token_type: 'bearer' })
+    await renderPage()
+    const form = screen.getByRole('form', { name: 'Change my password' })
+    await userEvent.type(within(form).getByLabelText('Current password'), 'old-password')
+    await userEvent.type(within(form).getByLabelText('New password'), 'brand-new-pass')
+    await userEvent.type(within(form).getByLabelText('Repeat new password'), 'brand-new-pass')
+    await userEvent.click(within(form).getByRole('button', { name: '💾 Change password' }))
+    expect(changePassword).toHaveBeenCalledWith('old-password', 'brand-new-pass')
+    expect(onNewToken).toHaveBeenCalledWith('fresh')
+    expect(await screen.findByRole('status')).toHaveTextContent('Password changed! Your other devices were signed out.')
+    expect(within(form).getByLabelText('Current password')).toHaveValue('')
+    expect(within(form).getByLabelText('New password')).toHaveValue('')
+    expect(within(form).getByLabelText('Repeat new password')).toHaveValue('')
+  })
+
+  it('checks my new password before asking the server', async () => {
+    await renderPage()
+    const form = screen.getByRole('form', { name: 'Change my password' })
+    await userEvent.type(within(form).getByLabelText('Current password'), 'old-password')
+    await userEvent.type(within(form).getByLabelText('New password'), 'brand-new-pass')
+    await userEvent.type(within(form).getByLabelText('Repeat new password'), 'brand-new-passs')
+    await userEvent.click(within(form).getByRole('button', { name: '💾 Change password' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent("The new passwords don't match.")
+
+    await userEvent.clear(within(form).getByLabelText('New password'))
+    await userEvent.type(within(form).getByLabelText('New password'), 'short')
+    await userEvent.clear(within(form).getByLabelText('Repeat new password'))
+    await userEvent.type(within(form).getByLabelText('Repeat new password'), 'short')
+    await userEvent.click(within(form).getByRole('button', { name: '💾 Change password' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your new password needs 8+ characters.')
+    expect(changePassword).not.toHaveBeenCalled()
+    expect(onNewToken).not.toHaveBeenCalled()
+  })
+
+  it('shows why the password could not be changed and keeps the typed values', async () => {
+    vi.mocked(changePassword).mockRejectedValue(new Error('Your current password is not right.'))
+    await renderPage()
+    const form = screen.getByRole('form', { name: 'Change my password' })
+    await userEvent.type(within(form).getByLabelText('Current password'), 'wrong-password')
+    await userEvent.type(within(form).getByLabelText('New password'), 'brand-new-pass')
+    await userEvent.type(within(form).getByLabelText('Repeat new password'), 'brand-new-pass')
+    await userEvent.click(within(form).getByRole('button', { name: '💾 Change password' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your current password is not right.')
+    expect(onNewToken).not.toHaveBeenCalled()
+    expect(within(form).getByLabelText('New password')).toHaveValue('brand-new-pass')
   })
 
   it('edits a user inline', async () => {

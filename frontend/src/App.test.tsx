@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App, { TOKEN_KEY } from './App'
-import { getMe, joinFamily, login, setAuthToken, setUnauthorizedHandler, signup } from './api'
+import { getMe, joinFamily, login, setAuthToken, setUnauthorizedHandler, signup, verifyEmail } from './api'
 import { admin, mia, parent } from './test/fixtures'
 
 vi.mock('./api', () => ({
@@ -13,10 +13,12 @@ vi.mock('./api', () => ({
   resetPasswordWithToken: vi.fn(),
   signup: vi.fn(),
   joinFamily: vi.fn(),
+  verifyEmail: vi.fn(),
+  resendVerification: vi.fn(),
 }))
 vi.mock('./pages/ParentDashboard', () => ({ default: ({ onLogout }: { onLogout: () => void }) => <button onClick={onLogout}>parent page</button> }))
 vi.mock('./pages/ChildDashboard', () => ({ default: () => <p>child page</p> }))
-vi.mock('./pages/AdminPage', () => ({ default: () => <p>admin page</p> }))
+vi.mock('./pages/AdminPage', () => ({ default: ({ onNewToken }: { onNewToken: (token: string) => void }) => <button onClick={() => onNewToken('rotated')}>admin page</button> }))
 
 const visit = (path: string) => window.history.pushState({}, '', path)
 
@@ -92,9 +94,8 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: /Forgot your password/ })).toBeInTheDocument()
   })
 
-  it('signs up a new family and stores the token the same way login does', async () => {
-    vi.mocked(signup).mockResolvedValue({ access_token: 'new-family', token_type: 'bearer' })
-    vi.mocked(getMe).mockResolvedValue(parent)
+  it('signs up a new family and asks them to confirm their email instead of signing in', async () => {
+    vi.mocked(signup).mockResolvedValue({ message: 'We sent a link to mom@example.com. Open it to finish signing up.' })
     visit('/signup')
     render(<App />)
     await userEvent.type(await screen.findByLabelText('Family name'), 'The Riveras')
@@ -102,15 +103,16 @@ describe('App', () => {
     await userEvent.type(screen.getByLabelText('Email'), 'mom@example.com')
     await userEvent.type(screen.getByLabelText('Password (8+ characters)'), 'long-password')
     await userEvent.click(screen.getByRole('button', { name: '🏡 Create our family' }))
-    expect(await screen.findByText('parent page')).toBeInTheDocument()
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('new-family')
-    expect(setAuthToken).toHaveBeenCalledWith('new-family')
-    expect(window.location.pathname).toBe('/parent')
+    expect(await screen.findByRole('heading', { name: 'Check your inbox' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('mom@example.com')
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+    expect(setAuthToken).not.toHaveBeenCalled()
+    expect(getMe).not.toHaveBeenCalled()
+    expect(window.location.pathname).toBe('/signup')
   })
 
-  it('joins a family from an invite link as a kid', async () => {
-    vi.mocked(joinFamily).mockResolvedValue({ access_token: 'joined', token_type: 'bearer' })
-    vi.mocked(getMe).mockResolvedValue(mia)
+  it('joins a family from an invite link as a kid, then asks them to confirm their email', async () => {
+    vi.mocked(joinFamily).mockResolvedValue({ message: 'We sent a link to mia@example.com. Open it to finish signing up.' })
     visit('/join?code=ABC123')
     render(<App />)
     expect(await screen.findByLabelText('Invite code')).toHaveValue('ABC123')
@@ -119,9 +121,29 @@ describe('App', () => {
     await userEvent.type(screen.getByLabelText('Email'), 'mia@example.com')
     await userEvent.type(screen.getByLabelText('Password (8+ characters)'), 'long-password')
     await userEvent.click(screen.getByRole('button', { name: '🎟️ Join the family' }))
-    expect(await screen.findByText('child page')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Check your inbox' })).toBeInTheDocument()
     expect(joinFamily).toHaveBeenCalledWith(expect.objectContaining({ invite_code: 'ABC123', role: 'child' }))
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('joined')
-    expect(window.location.pathname).toBe('/child')
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+    expect(window.location.pathname).toBe('/join')
+  })
+
+  it('confirms an email link while signed out', async () => {
+    vi.mocked(verifyEmail).mockResolvedValue({ message: 'Your email is confirmed. You can sign in now.' })
+    visit('/verify-email?token=abc')
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Your email is confirmed 🎉' })).toBeInTheDocument()
+    expect(verifyEmail).toHaveBeenCalledWith('abc')
+    expect(getMe).not.toHaveBeenCalled()
+    expect(window.location.pathname).toBe('/verify-email')
+  })
+
+  it('stores the new token when an admin changes their password', async () => {
+    localStorage.setItem(TOKEN_KEY, 'saved')
+    vi.mocked(getMe).mockResolvedValue(admin)
+    visit('/admin')
+    render(<App />)
+    await userEvent.click(await screen.findByText('admin page'))
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('rotated')
+    expect(setAuthToken).toHaveBeenLastCalledWith('rotated')
   })
 })
