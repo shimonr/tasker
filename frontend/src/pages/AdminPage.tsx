@@ -1,10 +1,10 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
-import { createUser, deleteUser, fetchUsers, resetPassword, updateUser } from '../api'
-import type { User, UserRole } from '../types'
+import { createUser, deleteUser, fetchAdminFamilies, fetchUsers, resetPassword, updateUser } from '../api'
+import type { FamilySummary, User, UserRole } from '../types'
 import Modal from '../components/Modal'
 import Navbar from '../components/Navbar'
 import { useToast } from '../components/Toast'
-import { kidEmoji, userName } from '../lib/tasks'
+import { avatarFor, userName } from '../lib/tasks'
 
 interface AdminPageProps {
   user: User
@@ -17,10 +17,11 @@ const ROLES: { value: UserRole; label: string }[] = [
   { value: 'admin', label: '🛡️ Admin' },
 ]
 const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.value, r.label])) as Record<UserRole, string>
-const emptyAccount = { username: '', email: '', full_name: '', role: 'parent' as UserRole, password: '' }
+const emptyAccount = { username: '', email: '', full_name: '', role: 'parent' as UserRole, password: '', family_id: '' }
 
 export default function AdminPage({ user, onLogout }: AdminPageProps) {
   const [users, setUsers] = useState<User[]>([])
+  const [families, setFamilies] = useState<FamilySummary[]>([])
   const [account, setAccount] = useState(emptyAccount)
   const [resetEmail, setResetEmail] = useState('')
   const [resetValue, setResetValue] = useState('')
@@ -30,7 +31,11 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
   const { toast, attempt } = useToast()
   const cancelDelete = () => setDeleting(null)
 
-  const load = useCallback(async () => setUsers(await fetchUsers()), [])
+  const load = useCallback(async () => {
+    const [nextUsers, nextFamilies] = await Promise.all([fetchUsers(), fetchAdminFamilies()])
+    setUsers(nextUsers)
+    setFamilies(nextFamilies)
+  }, [])
 
   useEffect(() => {
     attempt(load)
@@ -38,8 +43,9 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
 
   const handleCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const { family_id, ...rest } = account
     return attempt(async () => {
-      await createUser(account)
+      await createUser(account.role === 'child' ? { ...rest, family_id: Number(family_id) } : rest)
       setAccount(emptyAccount)
       await load()
     }, 'Account created! A welcome email is on its way.')
@@ -103,6 +109,18 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
               </label>
             ))}
           </div>
+          {account.role === 'child' && (
+            <select aria-label="Family" required value={account.family_id} onChange={(e) => setAccount({ ...account, family_id: e.target.value })} className="input">
+              <option value="" disabled>
+                Choose a family…
+              </option>
+              {families.map((family) => (
+                <option key={family.id} value={family.id}>
+                  {family.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button type="submit" className="btn-success w-full">
             ✨ Create account
           </button>
@@ -170,7 +188,7 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
               ) : (
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="text-3xl" aria-hidden="true">
-                    {kidEmoji(u.id)}
+                    {avatarFor(u)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-lg font-bold text-grape-900">
@@ -179,6 +197,7 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
                     <p className="truncate text-sm text-grape-700">{u.email}</p>
                     <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-grape-400">
                       <span className="chip bg-white py-0.5 text-grape-700">{ROLE_LABEL[u.role]}</span>
+                      {u.family_name && <span className="chip bg-white py-0.5 text-grape-700">🏠 {u.family_name}</span>}
                       Joined {new Date(u.created_at).toLocaleDateString()}
                     </p>
                   </div>
@@ -198,6 +217,20 @@ export default function AdminPage({ user, onLogout }: AdminPageProps) {
                   </div>
                 </div>
               )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="card mt-6 border-bubble-200">
+        <h2 className="text-2xl text-grape-900">🏠 Families ({families.length})</h2>
+        <ul className="mt-4 space-y-2" aria-label="Families">
+          {families.map((family) => (
+            <li key={family.id} className="flex items-center justify-between gap-3 rounded-2xl bg-bubble-50 px-4 py-3">
+              <span className="min-w-0 truncate font-semibold text-grape-900">{family.name}</span>
+              <span className="chip shrink-0 bg-white text-grape-700">
+                {family.member_count} {family.member_count === 1 ? 'member' : 'members'}
+              </span>
             </li>
           ))}
         </ul>

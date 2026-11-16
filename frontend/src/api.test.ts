@@ -44,12 +44,40 @@ describe('api client', () => {
       [() => client.fetchChildStats(), 'get', '/child/stats'],
       [() => client.completeTask(5), 'post', '/child/tasks/5/complete'],
       [() => client.completeOccurrence(7), 'post', '/occurrences/7/complete'],
+      [() => client.signup({ family_name: 'F', full_name: 'P', email: 'a@b.c', password: 'pw' }), 'post', '/auth/signup', { family_name: 'F', full_name: 'P', email: 'a@b.c', password: 'pw' }],
+      [() => client.joinFamily({ invite_code: 'X1', role: 'child', full_name: 'K', email: 'a@b.c', password: 'pw' }), 'post', '/auth/join', { invite_code: 'X1', role: 'child', full_name: 'K', email: 'a@b.c', password: 'pw' }],
+      [() => client.updateProfile({ avatar: '🦄', color: '#123456' }), 'put', '/me/profile', { avatar: '🦄', color: '#123456' }],
+      [() => client.fetchFamily(), 'get', '/family'],
+      [() => client.createInviteCode(), 'post', '/family/invite-code'],
+      [() => client.createChild({ full_name: 'K', email: 'k@b.c', password: 'pw', avatar: '🐸' }), 'post', '/parent/children', { full_name: 'K', email: 'k@b.c', password: 'pw', avatar: '🐸' }],
+      [() => client.approveTask(5, 2), 'post', '/parent/tasks/5/approve', { child_id: 2 }],
+      [() => client.rejectTask(5, 2), 'post', '/parent/tasks/5/reject', { child_id: 2 }],
+      [() => client.approveOccurrence(7), 'post', '/parent/occurrences/7/approve'],
+      [() => client.rejectOccurrence(7), 'post', '/parent/occurrences/7/reject'],
+      [() => client.fetchWeek(), 'get', '/parent/week'],
+      [() => client.fetchRewards(), 'get', '/parent/rewards'],
+      [() => client.createReward({ name: 'Pizza', cost: 10 }), 'post', '/parent/rewards', { name: 'Pizza', cost: 10 }],
+      [() => client.updateReward(4, { active: false }), 'put', '/parent/rewards/4', { active: false }],
+      [() => client.deleteReward(4), 'delete', '/parent/rewards/4'],
+      [() => client.fetchRedemptions(), 'get', '/parent/redemptions'],
+      [() => client.fulfillRedemption(4), 'post', '/parent/redemptions/4/fulfill'],
+      [() => client.fetchAdminFamilies(), 'get', '/admin/families'],
+      [() => client.fetchChildRewards(), 'get', '/child/rewards'],
+      [() => client.redeemReward(4), 'post', '/child/rewards/4/redeem'],
+      [() => client.fetchChildRedemptions(), 'get', '/child/redemptions'],
     ]
     for (const [call, method, url, body] of calls) {
       await expect(call()).resolves.toEqual({ ok: true })
       expect([last().method, last().url, last().baseURL]).toEqual([method, url, '/api'])
       if (body) expect(JSON.parse(last().data)).toEqual(body)
     }
+  })
+
+  it('asks for one week of the parent chart by start date', async () => {
+    await client.fetchWeek('2026-01-05')
+    expect(last().params).toEqual({ start: '2026-01-05' })
+    await client.fetchWeek()
+    expect(last().params).toEqual({ start: undefined })
   })
 
   it('logs in with a form-encoded body', async () => {

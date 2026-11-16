@@ -1,24 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   advanceTask,
+  approveOccurrence,
+  approveTask,
+  createChild,
+  createInviteCode,
   createTask,
   deleteTask,
   fetchChildren,
+  fetchFamily,
   fetchParentTasks,
+  fetchRedemptions,
+  fetchRewards,
   fetchStats,
   fetchTaskLogs,
+  fulfillRedemption,
+  rejectOccurrence,
+  rejectTask,
   updateOccurrenceStatus,
   updateTask,
   updateTaskStatus,
 } from '../api'
-import type { ParentStats, StatusLog, Task, TaskInput, TaskStatus, User } from '../types'
+import type { FamilyView, NewChild, ParentStats, Redemption, Reward, StatusLog, Task, TaskInput, TaskStatus, User } from '../types'
+import AddKidForm from '../components/AddKidForm'
+import Approvals from '../components/Approvals'
+import FamilyPanel from '../components/FamilyPanel'
 import Modal from '../components/Modal'
 import Navbar from '../components/Navbar'
+import RedemptionList from '../components/RedemptionList'
+import RewardsManager from '../components/RewardsManager'
 import TaskCard, { StatusPill } from '../components/TaskCard'
 import TaskForm from '../components/TaskForm'
 import TaskSections from '../components/TaskSections'
 import { useToast } from '../components/Toast'
-import { kidEmoji, nameFor, userName } from '../lib/tasks'
+import WeekChart from '../components/WeekChart'
+import { avatarFor, nameFor, pendingApprovals, userName, type PendingApproval } from '../lib/tasks'
 
 interface ParentDashboardProps {
   user: User
@@ -38,20 +54,36 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
   const [tasks, setTasks] = useState<Task[]>([])
   const [kids, setKids] = useState<User[]>([])
   const [stats, setStats] = useState<ParentStats | null>(null)
+  const [family, setFamily] = useState<FamilyView | null>(null)
+  const [rewards, setRewards] = useState<Reward[]>([])
+  const [redemptions, setRedemptions] = useState<Redemption[]>([])
+  const [version, setVersion] = useState(0)
   const [filter, setFilter] = useState<number | 'all'>('all')
+  const [addingKid, setAddingKid] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Task | null>(null)
   const [log, setLog] = useState<{ task: Task; entries: StatusLog[] } | null>(null)
   const [deleting, setDeleting] = useState<Task | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
-  const { toast, attempt } = useToast()
+  const { toast, attempt, notify } = useToast()
   const cancelDelete = () => setDeleting(null)
 
   const load = useCallback(async () => {
-    const [nextTasks, nextStats, nextKids] = await Promise.all([fetchParentTasks(), fetchStats(), fetchChildren()])
+    const [nextTasks, nextStats, nextKids, nextFamily, nextRewards, nextRedemptions] = await Promise.all([
+      fetchParentTasks(),
+      fetchStats(),
+      fetchChildren(),
+      fetchFamily(),
+      fetchRewards(),
+      fetchRedemptions(),
+    ])
     setTasks(nextTasks)
     setStats(nextStats)
     setKids(nextKids)
+    setFamily(nextFamily)
+    setRewards(nextRewards)
+    setRedemptions(nextRedemptions)
+    setVersion((n) => n + 1)
   }, [])
 
   useEffect(() => {
@@ -78,6 +110,16 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
     )
 
   const refreshAfter = (action: () => Promise<unknown>, success?: string) => attempt(() => action().then(load), success)
+
+  const addKid = async (child: NewChild) => {
+    if (await refreshAfter(() => createChild(child), 'Kid added! 🎉')) setAddingKid(false)
+  }
+
+  const decide = (item: PendingApproval, approve: boolean) =>
+    refreshAfter(() => {
+      if (item.kind === 'task') return approve ? approveTask(item.taskId, item.childId) : rejectTask(item.taskId, item.childId)
+      return approve ? approveOccurrence(item.occurrenceId) : rejectOccurrence(item.occurrenceId)
+    }, approve ? 'Stars awarded! ⭐' : 'Sent back to try again')
 
   const changedBy = (userId: number) => (userId === user.id ? userName(user) : nameFor(userId, kids))
   const visible = filter === 'all' ? tasks : tasks.filter((task) => task.assignments.some((a) => a.child_id === filter))
@@ -106,11 +148,11 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
         <div className="card border-sunny-200">
           <h2 className="text-2xl text-grape-900">⭐ Star champions</h2>
           {stats && stats.children.length > 0 ? (
-            <ol className="mt-3 space-y-2">
+            <ol aria-label="Star champions" className="mt-3 space-y-2">
               {stats.children.map((entry, index) => (
                 <li key={entry.child_id} className="flex items-center gap-3 rounded-2xl bg-sunny-50 px-3 py-2">
                   <span className="w-8 text-center text-2xl" aria-hidden="true">
-                    {MEDALS[index] ?? kidEmoji(entry.child_id)}
+                    {MEDALS[index] ?? avatarFor({ id: entry.child_id, avatar: entry.avatar })}
                   </span>
                   <span className="min-w-0 flex-1 truncate font-semibold">{entry.name}</span>
                   <span className="chip bg-sunny-200 text-grape-900">⭐ {entry.stars}</span>
@@ -126,6 +168,27 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
         </div>
       </section>
 
+      <Approvals items={pendingApprovals(tasks, kids)} onDecide={decide} />
+
+      <section className="mb-6 grid gap-6 lg:grid-cols-2">
+        {family && <FamilyPanel family={family} onNotify={notify} onNewCode={() => refreshAfter(() => createInviteCode(), 'New invite code ready! 🎟️')} />}
+        <div className="card border-bubble-200">
+          <h2 className="text-2xl text-grape-900">🌟 Kids</h2>
+          <p className="mt-1 text-grape-700">Each kid gets their own login. They see only their own missions, stars and rewards.</p>
+          {addingKid ? (
+            <div className="mt-5">
+              <AddKidForm onSubmit={addKid} onCancel={() => setAddingKid(false)} />
+            </div>
+          ) : (
+            <button type="button" className="btn-success mt-5 w-full sm:w-auto" onClick={() => setAddingKid(true)}>
+              ➕ Add a kid
+            </button>
+          )}
+        </div>
+      </section>
+
+      <WeekChart version={version} />
+
       <div ref={formRef} className="mb-6 scroll-mt-24">
         {formOpen ? (
           <section className="card border-bubble-200">
@@ -140,7 +203,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
       </div>
 
       <nav aria-label="Filter by kid" className="-mx-4 mb-6 flex gap-2 overflow-x-auto px-4 pb-2">
-        {[{ id: 'all' as const, label: '🌈 Everyone' }, ...kids.map((kid) => ({ id: kid.id, label: `${kidEmoji(kid.id)} ${userName(kid)}` }))].map(
+        {[{ id: 'all' as const, label: '🌈 Everyone' }, ...kids.map((kid) => ({ id: kid.id, label: `${avatarFor(kid)} ${userName(kid)}` }))].map(
           (option) => (
             <button
               key={option.id}
@@ -176,6 +239,23 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
           />
         )}
       />
+
+      <section className="mt-10 grid gap-6 lg:grid-cols-2">
+        <div className="card border-sunny-200">
+          <h2 className="text-2xl text-grape-900">🎁 Rewards</h2>
+          <p className="mb-4 mt-1 text-grape-700">Kids spend their stars on these. Spent stars are never taken back.</p>
+          <RewardsManager rewards={rewards} run={refreshAfter} />
+        </div>
+        <div className="card border-bubble-200">
+          <h2 className="text-2xl text-grape-900">🛎️ Reward requests</h2>
+          <p className="mb-4 mt-1 text-grape-700">When a kid asks for a reward, hand it over here and tap Fulfill.</p>
+          <RedemptionList
+            redemptions={redemptions}
+            emptyText="No requests yet. They show up here when a kid spends stars."
+            onFulfill={(id) => refreshAfter(() => fulfillRedemption(id), 'Handed over! 🎁')}
+          />
+        </div>
+      </section>
 
       {log && (
         <Modal title={log.task.title} subtitle="Status history" onClose={() => setLog(null)}>

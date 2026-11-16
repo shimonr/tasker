@@ -32,6 +32,14 @@ ADDED_COLUMNS = [
     ("task_assignments", "is_active", "BOOLEAN DEFAULT TRUE"),
     ("users", "token_version", "INTEGER NOT NULL DEFAULT 0"),
     ("task_occurrences", "completed_by", "INTEGER"),
+    ("users", "family_id", "INTEGER"),
+    ("users", "avatar", "VARCHAR(8)"),
+    ("users", "color", "VARCHAR(7)"),
+    ("tasks", "requires_approval", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("task_assignments", "awaiting_approval", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("task_assignments", "reminded_at", "TIMESTAMP WITH TIME ZONE"),
+    ("task_occurrences", "awaiting_approval", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("task_occurrences", "reminded_at", "TIMESTAMP WITH TIME ZONE"),
 ]
 
 

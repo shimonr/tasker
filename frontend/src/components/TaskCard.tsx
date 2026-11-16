@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Recurrence, Task, TaskStatus, User } from '../types'
-import { PRIORITY, RECURRENCE, STATUS, STATUSES, TASK_TYPE, currentOccurrence, formatDate, nameFor } from '../lib/tasks'
+import { PRIORITY, RECURRENCE, STATUS, STATUSES, TASK_TYPE, currentOccurrence, dueHint, formatDate, nameFor } from '../lib/tasks'
 
 interface ParentProps {
   viewer: 'parent'
@@ -57,6 +57,8 @@ export default function TaskCard(props: TaskCardProps) {
   const mine = props.viewer === 'child' ? task.assignments.find((a) => a.child_id === props.childId) : undefined
   const status: TaskStatus = recurring ? current?.status ?? 'pending' : mine?.completed ? 'completed' : task.status
   const myTurn = !rotating || Boolean(mine?.is_active)
+  const awaiting = props.viewer === 'child' && Boolean(recurring ? current?.awaiting_approval : mine?.awaiting_approval)
+  const hint = props.viewer === 'child' && task.due_date && !recurring && status !== 'completed' ? dueHint(task.due_date) : null
 
   return (
     <article className={`card flex flex-col gap-4 ${type.border}`}>
@@ -74,6 +76,7 @@ export default function TaskCard(props: TaskCardProps) {
 
       <div className="flex flex-wrap gap-2 text-sm">
         {task.due_date && !recurring && <span className="chip bg-sunny-100 text-grape-700">📅 Due {formatDate(task.due_date)}</span>}
+        {hint && <span className={`chip ${hint.tone === 'overdue' ? 'bg-rose-100 text-rose-600' : 'bg-tangy-100 text-tangy-600'}`}>{hint.text}</span>}
         {recurring && !current && task.start_date && <span className="chip bg-sunny-100 text-grape-700">🚦 Starts {formatDate(task.start_date)}</span>}
         {priority && (
           <span className="chip bg-tangy-100 text-tangy-600" title={`${task.priority} priority`}>
@@ -110,6 +113,8 @@ export default function TaskCard(props: TaskCardProps) {
           {props.viewer === 'child' ? (
             current.status === 'completed' ? (
               <span className="font-semibold text-leaf-600">All done, superstar! 🌟</span>
+            ) : awaiting ? (
+              <span className="font-semibold text-sunny-500">⏳ Waiting for a grown-up to say yes</span>
             ) : (
               <button type="button" className="btn-success" onClick={() => props.onCompleteOccurrence(current.id)}>
                 ✅ I did it!
@@ -147,7 +152,11 @@ export default function TaskCard(props: TaskCardProps) {
         </div>
       )}
 
-      {props.viewer === 'child' && !recurring && status !== 'completed' && (
+      {props.viewer === 'child' && !recurring && status !== 'completed' && awaiting && (
+        <p className="font-semibold text-sunny-500">⏳ Waiting for a grown-up to say yes</p>
+      )}
+
+      {props.viewer === 'child' && !recurring && status !== 'completed' && !awaiting && (
         <div className="flex flex-wrap gap-2">
           {myTurn ? (
             <>

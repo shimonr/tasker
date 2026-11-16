@@ -1,15 +1,27 @@
 import axios from 'axios'
 import type {
   ChildStats,
+  FamilySummary,
+  FamilyView,
+  JoinInput,
+  NewChild,
   NewUser,
   Occurrence,
   ParentStats,
+  ProfileUpdate,
+  Redemption,
+  Reward,
+  RewardInput,
+  RewardUpdate,
+  SignupInput,
   StatusLog,
   Task,
   TaskInput,
   TaskStatus,
+  Token,
   User,
   UserUpdate,
+  WeekView,
 } from './types'
 
 // Same-origin "<base path>/api" by default (nginx or the Vite dev proxy forwards it to the backend).
@@ -63,11 +75,14 @@ api.interceptors.response.use(
 const data = <T>(request: Promise<{ data: T }>) => request.then((response) => response.data)
 
 export const login = (username: string, password: string) =>
-  data<{ access_token: string }>(api.post('/token', new URLSearchParams({ username, password })))
+  data<Token>(api.post('/token', new URLSearchParams({ username, password })))
 export const forgotPassword = (email: string) => data<{ message: string }>(api.post('/auth/forgot-password', { email }))
 export const resetPasswordWithToken = (token: string, newPassword: string) =>
   data<{ message: string }>(api.post('/auth/reset-password', { token, new_password: newPassword }))
 export const getMe = () => data<User>(api.get('/me'))
+export const signup = (input: SignupInput) => data<Token>(api.post('/auth/signup', input))
+export const joinFamily = (input: JoinInput) => data<Token>(api.post('/auth/join', input))
+export const updateProfile = (profile: ProfileUpdate) => data<User>(api.put('/me/profile', profile))
 
 export const fetchUsers = () => data<User[]>(api.get('/admin/users'))
 export const createUser = (user: NewUser) => data<User>(api.post('/admin/users', user))
@@ -76,7 +91,10 @@ export const deleteUser = (userId: number) => data(api.delete(`/admin/users/${us
 export const resetPassword = (email: string, password: string) =>
   data(api.post('/admin/reset-password', { email, new_password: password }))
 
+export const fetchFamily = () => data<FamilyView>(api.get('/family'))
+export const createInviteCode = () => data<{ invite_code: string }>(api.post('/family/invite-code'))
 export const fetchChildren = () => data<User[]>(api.get('/parent/children'))
+export const createChild = (child: NewChild) => data<User>(api.post('/parent/children', child))
 export const fetchParentTasks = () => data<Task[]>(api.get('/parent/tasks'))
 export const fetchStats = () => data<ParentStats>(api.get('/parent/tasks/stats'))
 export const createTask = (task: TaskInput) => data<Task>(api.post('/parent/tasks', task))
@@ -87,10 +105,25 @@ export const fetchTaskLogs = (taskId: number) => data<StatusLog[]>(api.get(`/par
 export const updateTaskStatus = (taskId: number, status: TaskStatus) => data(api.post(`/tasks/${taskId}/status`, { status }))
 export const updateOccurrenceStatus = (occurrenceId: number, status: TaskStatus) =>
   data<Occurrence>(api.put(`/occurrences/${occurrenceId}/status`, { status }))
+export const approveTask = (taskId: number, childId: number) => data<Task>(api.post(`/parent/tasks/${taskId}/approve`, { child_id: childId }))
+export const rejectTask = (taskId: number, childId: number) => data<Task>(api.post(`/parent/tasks/${taskId}/reject`, { child_id: childId }))
+export const approveOccurrence = (occurrenceId: number) => data<Occurrence>(api.post(`/parent/occurrences/${occurrenceId}/approve`))
+export const rejectOccurrence = (occurrenceId: number) => data<Occurrence>(api.post(`/parent/occurrences/${occurrenceId}/reject`))
+export const fetchWeek = (start?: string) => data<WeekView>(api.get('/parent/week', { params: { start } }))
+export const fetchRewards = () => data<Reward[]>(api.get('/parent/rewards'))
+export const createReward = (reward: RewardInput) => data<Reward>(api.post('/parent/rewards', reward))
+export const updateReward = (rewardId: number, reward: RewardUpdate) => data<Reward>(api.put(`/parent/rewards/${rewardId}`, reward))
+export const deleteReward = (rewardId: number) => data(api.delete(`/parent/rewards/${rewardId}`))
+export const fetchRedemptions = () => data<Redemption[]>(api.get('/parent/redemptions'))
+export const fulfillRedemption = (redemptionId: number) => data<Redemption>(api.post(`/parent/redemptions/${redemptionId}/fulfill`))
+export const fetchAdminFamilies = () => data<FamilySummary[]>(api.get('/admin/families'))
 
 export const fetchChildTasks = () => data<Task[]>(api.get('/child/tasks'))
 export const fetchChildStats = () => data<ChildStats>(api.get('/child/stats'))
 export const completeTask = (taskId: number) => data(api.post(`/child/tasks/${taskId}/complete`))
 export const completeOccurrence = (occurrenceId: number) => data<Occurrence>(api.post(`/occurrences/${occurrenceId}/complete`))
+export const fetchChildRewards = () => data<Reward[]>(api.get('/child/rewards'))
+export const redeemReward = (rewardId: number) => data<Redemption>(api.post(`/child/rewards/${rewardId}/redeem`))
+export const fetchChildRedemptions = () => data<Redemption[]>(api.get('/child/redemptions'))
 
 export default api

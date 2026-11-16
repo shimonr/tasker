@@ -140,3 +140,29 @@ def send_task_completed(email: str, name: Optional[str], task_title: str, child_
         f"{app_base_url()}/parent",
         "task-completed",
     )
+
+
+def send_approval_request(email: str, name: Optional[str], child_name: str, task_title: str) -> bool:
+    return send_email(
+        email,
+        name,
+        f"{child_name} finished: {task_title} ✅",
+        "Can you check this one?",
+        [f"{child_name} says “{task_title}” is done. Approve it to give the stars, or send it back."],
+        "Review approvals",
+        f"{app_base_url()}/parent",
+        "approval-request",
+    )
+
+
+def send_reminder(email: str, name: Optional[str], task_title: str) -> bool:
+    return send_email(
+        email,
+        name,
+        f"Reminder: {task_title} ⏰",
+        "Mission reminder!",
+        [f"“{task_title}” is still waiting for you. Finish it to earn shiny stars ⭐"],
+        "See my tasks",
+        f"{app_base_url()}/child",
+        "reminder",
+    )

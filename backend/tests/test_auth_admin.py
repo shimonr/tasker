@@ -3,7 +3,7 @@ from datetime import timedelta
 import jwt
 import pytest
 
-from app import auth, models
+from app import auth, crud, models
 from app.timeutil import utcnow
 from conftest import PASSWORD, login, make_user
 
@@ -155,10 +155,11 @@ def admin_h(db, client):
     return login(client, "boss")
 
 
-def test_admin_creates_user_and_welcome_email_is_sent(client, admin_h, sent_emails):
+def test_admin_creates_user_and_welcome_email_is_sent(client, db, admin_h, sent_emails):
+    family_id = crud.create_family(db, "Kids club").id
     response = client.post(
         "/api/admin/users",
-        json={"email": "new@example.com", "username": "  ", "full_name": "New Kid", "role": "child", "password": "long-enough"},
+        json={"email": "new@example.com", "username": "  ", "full_name": "New Kid", "role": "child", "password": "long-enough", "family_id": family_id},
         headers=admin_h,
     )
     assert response.status_code == 200, response.text
@@ -168,7 +169,7 @@ def test_admin_creates_user_and_welcome_email_is_sent(client, admin_h, sent_emai
     assert sent_emails == [("send_welcome", ("new@example.com", "New Kid", "child"))]
     # A second user without username must not collide on "".
     second = client.post(
-        "/api/admin/users", json={"email": "new2@example.com", "username": "", "role": "child", "password": "long-enough"}, headers=admin_h
+        "/api/admin/users", json={"email": "new2@example.com", "username": "", "role": "child", "password": "long-enough", "family_id": family_id}, headers=admin_h
     )
     assert second.status_code == 200
 

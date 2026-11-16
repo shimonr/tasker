@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App, { TOKEN_KEY } from './App'
-import { getMe, login, setAuthToken, setUnauthorizedHandler } from './api'
+import { getMe, joinFamily, login, setAuthToken, setUnauthorizedHandler, signup } from './api'
 import { admin, mia, parent } from './test/fixtures'
 
 vi.mock('./api', () => ({
@@ -11,6 +11,8 @@ vi.mock('./api', () => ({
   setUnauthorizedHandler: vi.fn(),
   forgotPassword: vi.fn(),
   resetPasswordWithToken: vi.fn(),
+  signup: vi.fn(),
+  joinFamily: vi.fn(),
 }))
 vi.mock('./pages/ParentDashboard', () => ({ default: ({ onLogout }: { onLogout: () => void }) => <button onClick={onLogout}>parent page</button> }))
 vi.mock('./pages/ChildDashboard', () => ({ default: () => <p>child page</p> }))
@@ -33,7 +35,7 @@ describe('App', () => {
   })
 
   it('signs in and lands on the role home page', async () => {
-    vi.mocked(login).mockResolvedValue({ access_token: 'tok' })
+    vi.mocked(login).mockResolvedValue({ access_token: 'tok', token_type: 'bearer' })
     vi.mocked(getMe).mockResolvedValue(mia)
     visit('/login')
     render(<App />)
@@ -88,5 +90,38 @@ describe('App', () => {
     visit('/forgot-password')
     render(<App />)
     expect(await screen.findByRole('heading', { name: /Forgot your password/ })).toBeInTheDocument()
+  })
+
+  it('signs up a new family and stores the token the same way login does', async () => {
+    vi.mocked(signup).mockResolvedValue({ access_token: 'new-family', token_type: 'bearer' })
+    vi.mocked(getMe).mockResolvedValue(parent)
+    visit('/signup')
+    render(<App />)
+    await userEvent.type(await screen.findByLabelText('Family name'), 'The Riveras')
+    await userEvent.type(screen.getByLabelText('Your name'), 'Mom Rivera')
+    await userEvent.type(screen.getByLabelText('Email'), 'mom@example.com')
+    await userEvent.type(screen.getByLabelText('Password (8+ characters)'), 'long-password')
+    await userEvent.click(screen.getByRole('button', { name: '🏡 Create our family' }))
+    expect(await screen.findByText('parent page')).toBeInTheDocument()
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('new-family')
+    expect(setAuthToken).toHaveBeenCalledWith('new-family')
+    expect(window.location.pathname).toBe('/parent')
+  })
+
+  it('joins a family from an invite link as a kid', async () => {
+    vi.mocked(joinFamily).mockResolvedValue({ access_token: 'joined', token_type: 'bearer' })
+    vi.mocked(getMe).mockResolvedValue(mia)
+    visit('/join?code=ABC123')
+    render(<App />)
+    expect(await screen.findByLabelText('Invite code')).toHaveValue('ABC123')
+    await userEvent.click(screen.getByLabelText('🌟 Kid'))
+    await userEvent.type(screen.getByLabelText('Your name'), 'Mia')
+    await userEvent.type(screen.getByLabelText('Email'), 'mia@example.com')
+    await userEvent.type(screen.getByLabelText('Password (8+ characters)'), 'long-password')
+    await userEvent.click(screen.getByRole('button', { name: '🎟️ Join the family' }))
+    expect(await screen.findByText('child page')).toBeInTheDocument()
+    expect(joinFamily).toHaveBeenCalledWith(expect.objectContaining({ invite_code: 'ABC123', role: 'child' }))
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('joined')
+    expect(window.location.pathname).toBe('/child')
   })
 })

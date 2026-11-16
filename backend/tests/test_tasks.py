@@ -328,19 +328,24 @@ def test_monthly_task_starting_on_31st_can_be_created(client, family):
 # ---------------------------------------------------------------- stars, streaks, stats
 
 
+def core(stats: dict) -> dict:
+    """The star, count and streak fields (badges and balances are covered elsewhere)."""
+    return {k: stats[k] for k in ("stars", "completed_count", "streak_days")}
+
+
 def test_child_stats_stars_and_streak(client, db, family):
     ann = family["kids"][0]
-    assert client.get("/api/child/stats", headers=family["kid_h"][0]).json() == {"stars": 0, "completed_count": 0, "streak_days": 0}
+    assert core(client.get("/api/child/stats", headers=family["kid_h"][0]).json()) == {"stars": 0, "completed_count": 0, "streak_days": 0}
     now = utcnow()
     for days_ago, stars in [(1, 2), (2, 1), (4, 3)]:
         db.add(models.CompletionEvent(child_id=ann, task_title="old", stars=stars, completed_at=now - timedelta(days=days_ago)))
     db.commit()
     # Nothing today yet: yesterday's streak still counts.
-    assert client.get("/api/child/stats", headers=family["kid_h"][0]).json() == {"stars": 6, "completed_count": 3, "streak_days": 2}
+    assert core(client.get("/api/child/stats", headers=family["kid_h"][0]).json()) == {"stars": 6, "completed_count": 3, "streak_days": 2}
 
     task = create(client, family, priority="Low")
     client.post(f"/api/child/tasks/{task['id']}/complete", headers=family["kid_h"][0])
-    assert client.get("/api/child/stats", headers=family["kid_h"][0]).json() == {"stars": 7, "completed_count": 4, "streak_days": 3}
+    assert core(client.get("/api/child/stats", headers=family["kid_h"][0]).json()) == {"stars": 7, "completed_count": 4, "streak_days": 3}
 
 
 def test_parent_stats_counts_and_leaderboard(client, family):
@@ -359,7 +364,8 @@ def test_parent_stats_counts_and_leaderboard(client, family):
         "in_progress_tasks": 0,
         "failed_tasks": 1,
     }
-    assert stats["children"][0] == {"child_id": ann, "name": "Ann", "stars": 3, "completed_count": 1, "streak_days": 1}
+    assert core(stats["children"][0]) == {"stars": 3, "completed_count": 1, "streak_days": 1}
+    assert stats["children"][0]["child_id"] == ann and stats["children"][0]["name"] == "Ann"
     assert len(stats["children"]) == 3
 
 

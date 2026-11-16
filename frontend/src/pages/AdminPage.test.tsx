@@ -1,12 +1,13 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createUser, deleteUser, fetchUsers, resetPassword, updateUser } from '../api'
+import { createUser, deleteUser, fetchAdminFamilies, fetchUsers, resetPassword, updateUser } from '../api'
 import AdminPage from './AdminPage'
 import { admin, leo, mia } from '../test/fixtures'
 
 vi.mock('../api', () => ({
   createUser: vi.fn(),
   deleteUser: vi.fn(),
+  fetchAdminFamilies: vi.fn(),
   fetchUsers: vi.fn(),
   resetPassword: vi.fn(),
   updateUser: vi.fn(),
@@ -21,31 +22,56 @@ const row = (email: string) => screen.getByText(email).closest('li') as HTMLElem
 
 describe('AdminPage', () => {
   beforeEach(() => {
-    vi.mocked(fetchUsers).mockResolvedValue([admin, mia, leo])
+    vi.mocked(fetchUsers).mockResolvedValue([admin, { ...mia, family_name: 'The Riveras' }, { ...leo, family_name: 'The Riveras' }])
+    vi.mocked(fetchAdminFamilies).mockResolvedValue([
+      { id: 1, name: 'The Riveras', member_count: 3 },
+      { id: 2, name: 'The Smiths', member_count: 1 },
+    ])
     for (const fn of [createUser, deleteUser, resetPassword, updateUser]) vi.mocked(fn).mockResolvedValue({} as never)
   })
 
-  it('lists everyone without exposing passwords', async () => {
+  it('lists everyone with their family, without exposing passwords', async () => {
     await renderPage()
     expect(screen.getByRole('heading', { name: /Everyone \(3\)/ })).toBeInTheDocument()
     expect(within(row('leo@example.com')).getByText('🌟 Kid')).toBeInTheDocument()
+    expect(within(row('leo@example.com')).getByText('🏠 The Riveras')).toBeInTheDocument()
     expect(within(row('mia@example.com')).getByText('@mia')).toBeInTheDocument()
+    expect(within(row('admin@example.com')).queryByText(/🏠/)).not.toBeInTheDocument()
     expect(screen.queryByText(/password/i, { selector: 'li *' })).not.toBeInTheDocument()
     expect(within(row('admin@example.com')).getByRole('button', { name: 'Remove Administrator' })).toBeDisabled()
+  })
+
+  it('lists families with their member counts', async () => {
+    await renderPage()
+    expect(screen.getByRole('heading', { name: /Families \(2\)/ })).toBeInTheDocument()
+    const families = screen.getByRole('list', { name: 'Families' })
+    expect(within(families).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['The Riveras3 members', 'The Smiths1 member'])
   })
 
   it('creates an account', async () => {
     await renderPage()
     const form = screen.getByRole('form', { name: 'Create account' })
+    expect(within(form).queryByLabelText('Family')).not.toBeInTheDocument()
     await userEvent.type(within(form).getByLabelText('Username'), 'zoe')
     await userEvent.type(within(form).getByLabelText('Email'), 'zoe@example.com')
     await userEvent.type(within(form).getByLabelText('Full name'), 'Zoe')
     await userEvent.type(within(form).getByLabelText('Password'), 'long-password')
     await userEvent.click(within(form).getByLabelText('🌟 Kid'))
+    await userEvent.selectOptions(within(form).getByLabelText('Family'), 'The Smiths')
     await userEvent.click(within(form).getByRole('button', { name: '✨ Create account' }))
-    expect(createUser).toHaveBeenCalledWith({ username: 'zoe', email: 'zoe@example.com', full_name: 'Zoe', role: 'child', password: 'long-password' })
+    expect(createUser).toHaveBeenCalledWith({ username: 'zoe', email: 'zoe@example.com', full_name: 'Zoe', role: 'child', password: 'long-password', family_id: 2 })
     expect(await screen.findByRole('status')).toHaveTextContent('Account created!')
     expect(within(form).getByLabelText('Email')).toHaveValue('')
+    expect(within(form).queryByLabelText('Family')).not.toBeInTheDocument()
+  })
+
+  it('does not send a family for parents', async () => {
+    await renderPage()
+    const form = screen.getByRole('form', { name: 'Create account' })
+    await userEvent.type(within(form).getByLabelText('Email'), 'pat@example.com')
+    await userEvent.type(within(form).getByLabelText('Password'), 'long-password')
+    await userEvent.click(within(form).getByRole('button', { name: '✨ Create account' }))
+    expect(createUser).toHaveBeenCalledWith({ username: '', email: 'pat@example.com', full_name: '', role: 'parent', password: 'long-password' })
   })
 
   it('shows API errors', async () => {

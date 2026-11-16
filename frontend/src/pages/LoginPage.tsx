@@ -80,6 +80,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           </Link>
         </p>
       </form>
+      <p className="mt-4 text-center text-grape-700">
+        New here?{' '}
+        <Link to="/signup" className="font-semibold text-grape-600 underline decoration-wavy decoration-bubble-400 underline-offset-4">
+          Create a family
+        </Link>
+      </p>
     </AuthLayout>
   )
 }

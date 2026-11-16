@@ -40,6 +40,8 @@ services:
       EMAIL_SENDER_ADDRESS: ${EMAIL_SENDER_ADDRESS:-}
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-Family Task Adventure}
       EMAIL_OVERRIDE_RECIPIENT: ${EMAIL_OVERRIDE_RECIPIENT:-}
+      # Shared secret for the reminder cron job (POST /api/internal/reminders).
+      REMINDER_TOKEN: ${REMINDER_TOKEN:-}
     networks: [internal]
 
   web:

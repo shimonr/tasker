@@ -31,7 +31,23 @@ describe('TaskForm', () => {
       due_date: fromDateInput(future()),
       start_date: undefined,
       recurrence: undefined,
+      requires_approval: false,
     })
+  })
+
+  it('sends the grown-up approval choice, and prefills it when editing', async () => {
+    const { onSubmit } = setup()
+    await userEvent.click(screen.getByLabelText(/Repeats/))
+    await userEvent.type(screen.getByLabelText('Task name'), 'Mow lawn')
+    await userEvent.click(screen.getByLabelText(/Needs a grown-up/))
+    await userEvent.click(screen.getByLabelText(/Mia/))
+    await userEvent.click(screen.getByRole('button', { name: '✨ Create task' }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ requires_approval: true }))
+  })
+
+  it('shows an approval task as already needing approval', () => {
+    setup(task({ requires_approval: true, assignments: [assignment(mia.id)] }))
+    expect(screen.getByLabelText(/Needs a grown-up/)).toBeChecked()
   })
 
   it('creates a weekly recurring task starting today by default', async () => {

@@ -88,3 +88,5 @@ class RateLimiter:
 # Keyed by account, not IP, so spoofed proxy headers cannot bypass them.
 login_limiter = RateLimiter(max_attempts=10, window_seconds=15 * 60)
 password_reset_limiter = RateLimiter(max_attempts=3, window_seconds=60 * 60)
+# New families are rare; cap sign-ups for the whole app so the public form cannot be used to flood the database.
+signup_limiter = RateLimiter(max_attempts=10, window_seconds=60 * 60)

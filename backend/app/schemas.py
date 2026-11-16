@@ -11,6 +11,8 @@ from .timeutil import as_utc
 UTCDateTime = Annotated[datetime, AfterValidator(as_utc)]
 Priority = Literal["Low", "Medium", "High"]
 Password = Annotated[str, Field(min_length=8, max_length=128)]
+Avatar = Annotated[Optional[str], Field(None, max_length=8)]
+Color = Annotated[Optional[str], Field(None, pattern=r"^#[0-9a-fA-F]{6}$")]
 
 
 class UserRole(str, Enum):
@@ -74,6 +76,39 @@ class UserCreate(_UserFields):
     full_name: Optional[str] = Field(None, max_length=100)
     role: UserRole
     password: Password
+    family_id: Optional[int] = None
+
+
+class ChildCreate(_UserFields):
+    email: EmailStr
+    username: Optional[str] = Field(None, max_length=50)
+    full_name: Optional[str] = Field(None, max_length=100)
+    password: Password
+    avatar: Avatar = None
+    color: Color = None
+
+
+class ProfileUpdate(_UserFields):
+    full_name: Optional[str] = Field(None, max_length=100)
+    avatar: Avatar = None
+    color: Color = None
+
+
+class SignupRequest(_UserFields):
+    family_name: str = Field(min_length=1, max_length=60)
+    full_name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
+    username: Optional[str] = Field(None, max_length=50)
+    password: Password
+
+
+class JoinRequest(_UserFields):
+    invite_code: str = Field(min_length=1, max_length=32)
+    role: Literal["parent", "child"]
+    full_name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
+    username: Optional[str] = Field(None, max_length=50)
+    password: Password
 
 
 class UserUpdate(_UserFields):
@@ -90,6 +125,27 @@ class UserRead(ORMModel):
     full_name: Optional[str] = None
     role: UserRole
     created_at: UTCDateTime
+    family_id: Optional[int] = None
+    family_name: Optional[str] = None
+    avatar: Optional[str] = None
+    color: Optional[str] = None
+
+
+class FamilyView(BaseModel):
+    id: int
+    name: str
+    invite_code: str
+    members: List[UserRead]
+
+
+class InviteCode(BaseModel):
+    invite_code: str
+
+
+class FamilySummary(BaseModel):
+    id: int
+    name: str
+    member_count: int
 
 
 class AdminPasswordReset(BaseModel):
@@ -106,6 +162,10 @@ class ResetPasswordRequest(BaseModel):
     new_password: Password
 
 
+class ChildRef(BaseModel):
+    child_id: int
+
+
 class _TaskFields(BaseModel):
     model_config = ConfigDict(use_enum_values=True, str_strip_whitespace=True)
 
@@ -119,6 +179,7 @@ class TaskCreate(_TaskFields):
     assignee_ids: List[int] = []
     recurrence: Optional[TaskRecurrence] = None
     task_type: TaskType = TaskType.adhoc
+    requires_approval: bool = False
 
 
 class TaskUpdate(_TaskFields):
@@ -131,6 +192,7 @@ class TaskUpdate(_TaskFields):
     assignee_ids: Optional[List[int]] = None
     recurrence: Optional[TaskRecurrence] = None
     task_type: Optional[TaskType] = None
+    requires_approval: Optional[bool] = None
 
 
 class TaskStatusUpdate(BaseModel):
@@ -154,6 +216,7 @@ class AssignmentRead(ORMModel):
     assigned_at: UTCDateTime
     rotation_order: Optional[int] = None
     is_active: bool = True
+    awaiting_approval: bool = False
 
 
 class OccurrenceRead(ORMModel):
@@ -163,6 +226,7 @@ class OccurrenceRead(ORMModel):
     status: TaskStatus
     completed_at: Optional[UTCDateTime] = None
     completed_by: Optional[int] = None
+    awaiting_approval: bool = False
 
 
 class TaskRead(ORMModel):
@@ -175,21 +239,94 @@ class TaskRead(ORMModel):
     recurrence: Optional[TaskRecurrence] = None
     task_type: TaskType = TaskType.adhoc
     status: TaskStatus
+    requires_approval: bool = False
     created_by: int
     created_at: UTCDateTime
     assignments: List[AssignmentRead] = []
     occurrences: List[OccurrenceRead] = []
 
 
+class WeekItem(BaseModel):
+    task_id: int
+    occurrence_id: Optional[int] = None
+    title: str
+    priority: Optional[str] = None
+    child_id: int
+    child_name: str
+    status: TaskStatus
+    awaiting_approval: bool
+    due_date: Optional[UTCDateTime] = None
+
+
+class WeekDay(BaseModel):
+    date: str
+    items: List[WeekItem]
+
+
+class WeekView(BaseModel):
+    start: str
+    days: List[WeekDay]
+
+
+class RewardCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=100)
+    emoji: Optional[str] = Field(None, max_length=8)
+    cost: int = Field(ge=1, le=10000)
+
+
+class RewardUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    emoji: Optional[str] = Field(None, max_length=8)
+    cost: Optional[int] = Field(None, ge=1, le=10000)
+    active: Optional[bool] = None
+
+
+class RewardRead(ORMModel):
+    id: int
+    name: str
+    emoji: Optional[str] = None
+    cost: int
+    active: bool
+
+
+class RedemptionRead(ORMModel):
+    id: int
+    reward_id: Optional[int] = None
+    reward_name: str
+    reward_emoji: Optional[str] = None
+    child_id: int
+    child_name: str
+    cost: int
+    status: Literal["requested", "fulfilled"]
+    created_at: UTCDateTime
+    fulfilled_at: Optional[UTCDateTime] = None
+
+
+class Badge(BaseModel):
+    key: str
+    title: str
+    emoji: str
+    earned: bool
+
+
 class ChildStats(BaseModel):
     stars: int
+    spent: int
+    balance: int
     completed_count: int
     streak_days: int
+    badges: List[Badge]
 
 
 class ChildLeaderboardEntry(ChildStats):
     child_id: int
     name: str
+    avatar: Optional[str] = None
+    color: Optional[str] = None
 
 
 class ParentStats(BaseModel):

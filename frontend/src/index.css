@@ -102,3 +102,25 @@
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
 }
+
+/* Printing the week view prints only the chore chart: navigation, buttons and decorations are hidden. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #week-chart,
+  #week-chart * {
+    visibility: visible;
+  }
+
+  #week-chart {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    box-shadow: none;
+    background: white;
+  }
+}

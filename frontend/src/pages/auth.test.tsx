@@ -29,6 +29,7 @@ describe('LoginPage', () => {
     expect(screen.getByRole('button', { name: '🚀 Signing in…' })).toBeDisabled()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Forgot your password?' })).toHaveAttribute('href', '/forgot-password')
+    expect(screen.getByRole('link', { name: 'Create a family' })).toHaveAttribute('href', '/signup')
   })
 })
 

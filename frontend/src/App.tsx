@@ -6,9 +6,11 @@ import { homeFor } from './lib/tasks'
 import AdminPage from './pages/AdminPage'
 import ChildDashboard from './pages/ChildDashboard'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import JoinPage from './pages/JoinPage'
 import LoginPage from './pages/LoginPage'
 import ParentDashboard from './pages/ParentDashboard'
 import ResetPasswordPage from './pages/ResetPasswordPage'
+import SignupPage from './pages/SignupPage'
 
 export const TOKEN_KEY = 'tasker_token'
 
@@ -47,11 +49,16 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [handleLogout])
 
+  /** Store a fresh token and load the signed-in user. Used by login, sign-up and join. */
+  const startSession = async (accessToken: string) => {
+    localStorage.setItem(TOKEN_KEY, accessToken)
+    setAuthToken(accessToken)
+    setUser(await getMe())
+  }
+
   const handleLogin = async (username: string, password: string) => {
     const { access_token } = await login(username, password)
-    localStorage.setItem(TOKEN_KEY, access_token)
-    setAuthToken(access_token)
-    setUser(await getMe())
+    await startSession(access_token)
   }
 
   if (loading) {
@@ -65,7 +72,11 @@ export default function App() {
   const page = (role: UserRole) => {
     if (user?.role !== role) return <Navigate to={user ? homeFor(user.role) : '/login'} replace />
     const props = { user, onLogout: handleLogout }
-    return { admin: <AdminPage {...props} />, parent: <ParentDashboard {...props} />, child: <ChildDashboard {...props} /> }[role]
+    return {
+      admin: <AdminPage {...props} />,
+      parent: <ParentDashboard {...props} />,
+      child: <ChildDashboard {...props} onUserChange={setUser} />,
+    }[role]
   }
   const publicPage = (element: JSX.Element) => (user ? <Navigate to={homeFor(user.role)} replace /> : element)
 
@@ -74,6 +85,8 @@ export default function App() {
       <Decorations />
       <Routes>
         <Route path="/login" element={publicPage(<LoginPage onLogin={handleLogin} />)} />
+        <Route path="/signup" element={publicPage(<SignupPage onSignedIn={startSession} />)} />
+        <Route path="/join" element={publicPage(<JoinPage onSignedIn={startSession} />)} />
         <Route path="/forgot-password" element={publicPage(<ForgotPasswordPage />)} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/parent" element={page('parent')} />

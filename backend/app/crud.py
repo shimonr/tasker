@@ -11,6 +11,15 @@ from .timeutil import as_utc, utcnow
 
 PRIORITY_STARS = {"Low": 1, "Medium": 2, "High": 3}
 MAX_OCCURRENCES = 100
+# Each badge is (key, title, emoji, rule over the child's stats). Every badge is always returned.
+BADGES = [
+    ("first_task", "First mission", "🎯", lambda s: s["completed_count"] >= 1),
+    ("streak_3", "On a roll", "🔥", lambda s: s["streak_days"] >= 3),
+    ("streak_7", "Week warrior", "🏅", lambda s: s["streak_days"] >= 7),
+    ("stars_10", "Star collector", "⭐", lambda s: s["stars"] >= 10),
+    ("stars_50", "Star champion", "🌟", lambda s: s["stars"] >= 50),
+    ("tasks_25", "Busy bee", "🐝", lambda s: s["completed_count"] >= 25),
+]
 
 
 # ---------------------------------------------------------------- users
@@ -45,10 +54,10 @@ def get_users(db: Session) -> List[models.User]:
     return db.query(models.User).order_by(models.User.created_at.desc(), models.User.id.desc()).all()
 
 
-def get_children(db: Session) -> List[models.User]:
+def get_children(db: Session, family_id: int) -> List[models.User]:
     return (
         db.query(models.User)
-        .filter(models.User.role == models.UserRole.child)
+        .filter(models.User.role == models.UserRole.child, models.User.family_id == family_id)
         .order_by(models.User.created_at.desc(), models.User.id.desc())
         .all()
     )
@@ -61,23 +70,45 @@ def find_identity_conflict(db: Session, email: Optional[str], username: Optional
     return False
 
 
-def create_user(db: Session, user: schemas.UserCreate) -> models.User:
-    db_user = models.User(
-        email=user.email,
-        username=user.username,
-        full_name=user.full_name,
-        hashed_password=auth.get_password_hash(user.password),
-        role=user.role,
+def add_user(
+    db: Session,
+    *,
+    email: str,
+    username: Optional[str],
+    full_name: Optional[str],
+    password: str,
+    role: models.UserRole,
+    family_id: Optional[int] = None,
+    avatar: Optional[str] = None,
+    color: Optional[str] = None,
+) -> models.User:
+    user = models.User(
+        email=email,
+        username=username,
+        full_name=full_name,
+        hashed_password=auth.get_password_hash(password),
+        role=role,
         token_version=0,
+        family_id=family_id,
+        avatar=avatar,
+        color=color,
     )
-    db.add(db_user)
+    db.add(user)
     db.commit()
-    db.refresh(db_user)
-    return db_user
+    db.refresh(user)
+    return user
 
 
 def update_user(db: Session, user: models.User, user_update: schemas.UserUpdate) -> models.User:
     for field, value in user_update.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_profile(db: Session, user: models.User, profile: schemas.ProfileUpdate) -> models.User:
+    for field, value in profile.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
     db.commit()
     db.refresh(user)
@@ -91,7 +122,7 @@ def set_password(db: Session, user: models.User, new_password: str) -> None:
 
 
 def delete_user(db: Session, user: models.User) -> None:
-    # Tasks they created, their assignments and star history cascade through the ORM.
+    # Tasks they created, their assignments, star history and redemptions cascade through the ORM.
     db.query(models.TaskStatusLog).filter(models.TaskStatusLog.changed_by == user.id).delete()
     db.query(models.TaskOccurrence).filter(models.TaskOccurrence.completed_by == user.id).update({"completed_by": None})
     db.delete(user)
@@ -114,12 +145,80 @@ def get_or_create_app_secret(db: Session, name: str) -> str:
     return secret.value
 
 
+def get_app_secret(db: Session, name: str) -> Optional[str]:
+    secret = db.get(models.AppSecret, name)
+    return secret.value if secret else None
+
+
+def set_app_secret(db: Session, name: str, value: str) -> None:
+    secret = db.get(models.AppSecret, name)
+    if secret is None:
+        db.add(models.AppSecret(name=name, value=value))
+    else:
+        secret.value = value
+    db.commit()
+
+
+# ---------------------------------------------------------------- families
+
+
+def new_invite_code() -> str:
+    return secrets.token_urlsafe(6)
+
+
+def create_family(db: Session, name: str) -> models.Family:
+    family = models.Family(name=name, invite_code=new_invite_code())
+    db.add(family)
+    db.commit()
+    db.refresh(family)
+    return family
+
+
+def get_family(db: Session, family_id: int) -> Optional[models.Family]:
+    return db.get(models.Family, family_id)
+
+
+def get_family_by_code(db: Session, invite_code: str) -> Optional[models.Family]:
+    return db.query(models.Family).filter(models.Family.invite_code == invite_code.strip()).first()
+
+
+def regenerate_invite_code(db: Session, family: models.Family) -> str:
+    family.invite_code = new_invite_code()
+    db.commit()
+    return family.invite_code
+
+
+def family_members(db: Session, family_id: int) -> List[models.User]:
+    return db.query(models.User).filter(models.User.family_id == family_id).order_by(models.User.created_at, models.User.id).all()
+
+
+def family_summaries(db: Session) -> List[dict]:
+    families = db.query(models.Family).order_by(models.Family.id).all()
+    return [{"id": f.id, "name": f.name, "member_count": len(f.members)} for f in families]
+
+
+def assign_orphan_families(db: Session) -> None:
+    """Give parents and kids created before families existed a family of their own."""
+    orphans = db.query(models.User).filter(models.User.family_id.is_(None), models.User.role != models.UserRole.admin).all()
+    for user in orphans:
+        family = models.Family(name=f"{display_name(user)}'s family", invite_code=new_invite_code())
+        db.add(family)
+        db.flush()
+        user.family_id = family.id
+    if orphans:
+        db.commit()
+
+
 # ---------------------------------------------------------------- tasks
 
 
-def all_children(db: Session, child_ids: Iterable[int]) -> bool:
+def all_children(db: Session, child_ids: Iterable[int], family_id: int) -> bool:
     ids = set(child_ids)
-    found = db.query(models.User).filter(models.User.id.in_(ids), models.User.role == models.UserRole.child).count()
+    found = (
+        db.query(models.User)
+        .filter(models.User.id.in_(ids), models.User.role == models.UserRole.child, models.User.family_id == family_id)
+        .count()
+    )
     return found == len(ids)
 
 
@@ -146,6 +245,7 @@ def create_task(db: Session, data: schemas.TaskCreate, creator_id: int) -> model
         priority=data.priority,
         recurrence=data.recurrence if recurring else None,
         task_type=data.task_type,
+        requires_approval=data.requires_approval,
         status=models.TaskStatus.pending,
         created_by=creator_id,
     )
@@ -242,8 +342,9 @@ def get_task(db: Session, task_id: int) -> Optional[models.Task]:
     return db.get(models.Task, task_id)
 
 
-def get_tasks_for_parent(db: Session, parent_id: int, status: Optional[str] = None, child_id: Optional[int] = None) -> List[models.Task]:
-    query = _task_query(db).filter(models.Task.created_by == parent_id)
+def get_tasks_for_family(db: Session, family_id: int, status: Optional[str] = None, child_id: Optional[int] = None) -> List[models.Task]:
+    """Tasks created by any parent in the family."""
+    query = _task_query(db).join(models.User, models.Task.created_by == models.User.id).filter(models.User.family_id == family_id)
     if status in models.TaskStatus.__members__:
         query = query.filter(models.Task.status == models.TaskStatus(status))
     if child_id:
@@ -333,6 +434,7 @@ def complete_assignment(db: Session, assignment: models.TaskAssignment) -> Optio
     previous = task.status
     assignment.completed = True
     assignment.completed_at = utcnow()
+    assignment.awaiting_approval = False
     next_child_id = None
     if task.task_type == models.TaskType.rotating:
         assignment.is_active = False
@@ -351,6 +453,16 @@ def complete_assignment(db: Session, assignment: models.TaskAssignment) -> Optio
     _log(db, task, assignment.child_id, previous, task.status)
     db.commit()
     return next_child_id
+
+
+def request_assignment_approval(db: Session, assignment: models.TaskAssignment) -> None:
+    assignment.awaiting_approval = True
+    db.commit()
+
+
+def reject_assignment(db: Session, assignment: models.TaskAssignment) -> None:
+    assignment.awaiting_approval = False
+    db.commit()
 
 
 def get_task_status_logs(db: Session, task_id: int) -> List[models.TaskStatusLog]:
@@ -380,6 +492,7 @@ def set_occurrence_status(db: Session, occurrence: models.TaskOccurrence, user_i
         done = new_status == models.TaskStatus.completed
         occurrence.completed_at = utcnow() if done else None
         occurrence.completed_by = user_id if done else None
+        occurrence.awaiting_approval = False
         _log(db, occurrence.task, user_id, previous, new_status)
         db.commit()
     db.refresh(occurrence)
@@ -395,6 +508,95 @@ def complete_occurrence(db: Session, occurrence: models.TaskOccurrence, child_id
     return True
 
 
+def request_occurrence_approval(db: Session, occurrence: models.TaskOccurrence, child_id: int) -> None:
+    """Record that a child says they did it. completed_by holds that child until a parent decides."""
+    occurrence.awaiting_approval = True
+    occurrence.completed_by = child_id
+    db.commit()
+
+
+def reject_occurrence(db: Session, occurrence: models.TaskOccurrence) -> None:
+    occurrence.awaiting_approval = False
+    occurrence.completed_by = None
+    db.commit()
+
+
+# ---------------------------------------------------------------- rewards
+
+
+def list_rewards(db: Session, family_id: int, active_only: bool = False) -> List[models.Reward]:
+    query = db.query(models.Reward).filter(models.Reward.family_id == family_id)
+    if active_only:
+        query = query.filter(models.Reward.active == True)  # noqa: E712
+    return query.order_by(models.Reward.cost, models.Reward.id).all()
+
+
+def get_reward(db: Session, reward_id: int) -> Optional[models.Reward]:
+    return db.get(models.Reward, reward_id)
+
+
+def create_reward(db: Session, family_id: int, data: schemas.RewardCreate) -> models.Reward:
+    reward = models.Reward(family_id=family_id, name=data.name, emoji=data.emoji, cost=data.cost, active=True)
+    db.add(reward)
+    db.commit()
+    db.refresh(reward)
+    return reward
+
+
+def update_reward(db: Session, reward: models.Reward, data: schemas.RewardUpdate) -> models.Reward:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(reward, field, value)
+    db.commit()
+    db.refresh(reward)
+    return reward
+
+
+def delete_reward(db: Session, reward: models.Reward) -> None:
+    db.delete(reward)
+    db.commit()
+
+
+def child_spent(db: Session, child_id: int) -> int:
+    return db.query(func.coalesce(func.sum(models.Redemption.cost), 0)).filter(models.Redemption.child_id == child_id).scalar()
+
+
+def redeem(db: Session, child: models.User, reward: models.Reward) -> models.Redemption:
+    redemption = models.Redemption(
+        reward_id=reward.id,
+        reward_name=reward.name,
+        reward_emoji=reward.emoji,
+        child_id=child.id,
+        cost=reward.cost,
+        status=models.RedemptionStatus.requested,
+    )
+    db.add(redemption)
+    db.commit()
+    db.refresh(redemption)
+    return redemption
+
+
+def get_redemption(db: Session, redemption_id: int) -> Optional[models.Redemption]:
+    return db.get(models.Redemption, redemption_id)
+
+
+def list_redemptions(db: Session, family_id: Optional[int] = None, child_id: Optional[int] = None) -> List[models.Redemption]:
+    query = db.query(models.Redemption).join(models.Redemption.child)
+    if family_id is not None:
+        query = query.filter(models.User.family_id == family_id)
+    if child_id is not None:
+        query = query.filter(models.Redemption.child_id == child_id)
+    return query.order_by(models.Redemption.created_at.desc(), models.Redemption.id.desc()).all()
+
+
+def fulfill_redemption(db: Session, redemption: models.Redemption) -> models.Redemption:
+    if redemption.status != models.RedemptionStatus.fulfilled:
+        redemption.status = models.RedemptionStatus.fulfilled
+        redemption.fulfilled_at = utcnow()
+        db.commit()
+        db.refresh(redemption)
+    return redemption
+
+
 # ---------------------------------------------------------------- stats
 
 
@@ -408,7 +610,11 @@ def get_child_stats(db: Session, child_id: int) -> dict:
     while day in days:
         streak += 1
         day -= timedelta(days=1)
-    return {"stars": sum(event.stars for event in events), "completed_count": len(events), "streak_days": streak}
+    stars = sum(event.stars for event in events)
+    spent = child_spent(db, child_id)
+    stats = {"stars": stars, "spent": spent, "balance": stars - spent, "completed_count": len(events), "streak_days": streak}
+    stats["badges"] = [{"key": key, "title": title, "emoji": emoji, "earned": bool(rule(stats))} for key, title, emoji, rule in BADGES]
+    return stats
 
 
 def current_status(task: models.Task) -> models.TaskStatus:
@@ -418,13 +624,13 @@ def current_status(task: models.Task) -> models.TaskStatus:
     return task.status
 
 
-def get_completion_stats(db: Session, parent_id: int) -> dict:
-    tasks = refresh_tasks(db, get_tasks_for_parent(db, parent_id))
+def get_completion_stats(db: Session, family_id: int) -> dict:
+    tasks = refresh_tasks(db, get_tasks_for_family(db, family_id))
     statuses = [current_status(task) for task in tasks]
     counts = {status: statuses.count(status) for status in models.TaskStatus}
     leaderboard = [
-        {"child_id": child.id, "name": display_name(child), **get_child_stats(db, child.id)}
-        for child in get_children(db)
+        {"child_id": child.id, "name": display_name(child), "avatar": child.avatar, "color": child.color, **get_child_stats(db, child.id)}
+        for child in get_children(db, family_id)
     ]
     leaderboard.sort(key=lambda entry: entry["stars"], reverse=True)
     return {
@@ -435,3 +641,78 @@ def get_completion_stats(db: Session, parent_id: int) -> dict:
         "failed_tasks": counts[models.TaskStatus.failed],
         "children": leaderboard,
     }
+
+
+# ---------------------------------------------------------------- week and reminders
+
+
+def week_view(db: Session, family_id: int, start: datetime) -> List[dict]:
+    """Seven days from `start` (UTC midnight). Recurring tasks list each occurrence; other tasks list their due date."""
+    end = start + timedelta(days=7)
+    days = {(start + timedelta(days=offset)).date().isoformat(): [] for offset in range(7)}
+    for task in refresh_tasks(db, get_tasks_for_family(db, family_id)):
+        for assignment in task.assignments:
+            if task.task_type == models.TaskType.rotating and not assignment.is_active:
+                continue
+            if task.task_type == models.TaskType.recurring:
+                for occurrence in task.occurrences:
+                    when = as_utc(occurrence.occurrence_date)
+                    if start <= when < end:
+                        days[when.date().isoformat()].append(
+                            _week_item(task, assignment, occurrence.status, occurrence.awaiting_approval, occurrence.id, when)
+                        )
+            elif task.due_date and start <= as_utc(task.due_date) < end:
+                due = as_utc(task.due_date)
+                status = models.TaskStatus.completed if assignment.completed else task.status
+                days[due.date().isoformat()].append(_week_item(task, assignment, status, assignment.awaiting_approval, None, due))
+    return [{"date": day, "items": items} for day, items in days.items()]
+
+
+def _week_item(task: models.Task, assignment: models.TaskAssignment, status, awaiting: bool, occurrence_id, due) -> dict:
+    return {
+        "task_id": task.id,
+        "occurrence_id": occurrence_id,
+        "title": task.title,
+        "priority": task.priority,
+        "child_id": assignment.child_id,
+        "child_name": display_name(assignment.child),
+        "status": status,
+        "awaiting_approval": awaiting,
+        "due_date": due,
+    }
+
+
+def due_soon_assignments(db: Session, now: datetime) -> List[models.TaskAssignment]:
+    """Open one-off or rotating chores due in the next 24 hours that have not been reminded yet."""
+    rows = (
+        db.query(models.TaskAssignment)
+        .join(models.TaskAssignment.task)
+        .filter(
+            models.Task.task_type != models.TaskType.recurring,
+            models.Task.due_date.isnot(None),
+            models.Task.due_date >= now,
+            models.Task.due_date <= now + timedelta(hours=24),
+            models.TaskAssignment.completed == False,  # noqa: E712
+            models.TaskAssignment.awaiting_approval == False,  # noqa: E712
+            models.TaskAssignment.reminded_at.is_(None),
+        )
+        .all()
+    )
+    return [a for a in rows if a.task.task_type != models.TaskType.rotating or a.is_active]
+
+
+def open_occurrences(db: Session, now: datetime) -> List[models.TaskOccurrence]:
+    """Open recurring chores whose period started in the last 24 hours and have not been reminded yet."""
+    return (
+        db.query(models.TaskOccurrence)
+        .join(models.TaskOccurrence.task)
+        .filter(
+            models.Task.task_type == models.TaskType.recurring,
+            models.TaskOccurrence.occurrence_date >= now - timedelta(hours=24),
+            models.TaskOccurrence.occurrence_date <= now,
+            models.TaskOccurrence.status != models.TaskStatus.completed,
+            models.TaskOccurrence.awaiting_approval == False,  # noqa: E712
+            models.TaskOccurrence.reminded_at.is_(None),
+        )
+        .all()
+    )

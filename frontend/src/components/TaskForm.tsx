@@ -20,6 +20,7 @@ export default function TaskForm({ kids, editing, onSubmit, onCancel }: TaskForm
   const [recurrence, setRecurrence] = useState<Recurrence>(editing?.recurrence ?? 'daily')
   const [priority, setPriority] = useState<Priority>((editing?.priority as Priority) ?? 'Medium')
   const [childIds, setChildIds] = useState<number[]>(editing?.assignments.map((a) => a.child_id) ?? [])
+  const [needsApproval, setNeedsApproval] = useState(editing?.requires_approval ?? false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -47,6 +48,7 @@ export default function TaskForm({ kids, editing, onSubmit, onCancel }: TaskForm
       due_date: taskType === 'adhoc' ? fromDateInput(dueDate) : undefined,
       start_date: taskType === 'recurring' ? fromDateInput(startDate, '00:00:00') : undefined,
       recurrence: taskType === 'recurring' ? recurrence : undefined,
+      requires_approval: needsApproval,
     })
     setSaving(false)
   }
@@ -146,6 +148,11 @@ export default function TaskForm({ kids, editing, onSubmit, onCancel }: TaskForm
           </div>
         )}
       </fieldset>
+
+      <label className="choice">
+        <input type="checkbox" className="sr-only" checked={needsApproval} onChange={(e) => setNeedsApproval(e.target.checked)} />
+        🛡️ Needs a grown-up's approval
+      </label>
 
       {error && (
         <p role="alert" className="rounded-2xl bg-rose-50 px-4 py-2 font-semibold text-rose-600">

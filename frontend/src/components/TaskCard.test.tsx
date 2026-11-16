@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import TaskCard from './TaskCard'
 import type { Task } from '../types'
 import { assignment, leo, mia, occurrence, recurringTask, rotatingTask, task } from '../test/fixtures'
+import { fromDateInput, shiftDate, todayInput } from '../lib/tasks'
 
 const parentProps = () => ({
   viewer: 'parent' as const,
@@ -137,5 +138,34 @@ describe('TaskCard for kids', () => {
     rerender(<TaskCard task={done} {...props} />)
     expect(screen.getByText('All done, superstar! 🌟')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /History/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('TaskCard waiting for approval and due-date hints', () => {
+  const dateInput = (offsetDays: number) => fromDateInput(shiftDate(todayInput(), offsetDays))
+
+  it('says a kid is waiting for a yes on a one-time task instead of offering the button', () => {
+    render(<TaskCard task={task({ requires_approval: true, assignments: [assignment(mia.id, { awaiting_approval: true })] })} {...childProps()} />)
+    expect(screen.getByText('⏳ Waiting for a grown-up to say yes')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '✅ I did it!' })).not.toBeInTheDocument()
+  })
+
+  it('says a repeat is waiting for a yes until a grown-up decides', () => {
+    const waiting = recurringTask({ occurrences: [occurrence(21, '2026-01-03T00:00:00Z', { awaiting_approval: true })] })
+    render(<TaskCard task={waiting} {...childProps()} />)
+    expect(screen.getByText('⏳ Waiting for a grown-up to say yes')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '✅ I did it!' })).not.toBeInTheDocument()
+  })
+
+  it('does not treat a repeat with no occurrence yet as waiting', () => {
+    render(<TaskCard task={recurringTask({ occurrences: [] })} {...childProps()} />)
+    expect(screen.queryByText(/Waiting/)).not.toBeInTheDocument()
+  })
+
+  it('warns kids about tasks due tomorrow, and not about tasks for parents', () => {
+    const { rerender } = render(<TaskCard task={task({ due_date: dateInput(1) })} {...childProps()} />)
+    expect(screen.getByText('⏰ Due tomorrow')).toBeInTheDocument()
+    rerender(<TaskCard task={task({ due_date: dateInput(0) })} {...parentProps()} />)
+    expect(screen.queryByText('⏰ Due today!')).not.toBeInTheDocument()
   })
 })

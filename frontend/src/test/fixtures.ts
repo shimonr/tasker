@@ -1,4 +1,4 @@
-import type { Assignment, Occurrence, Task, User } from '../types'
+import type { Assignment, ChildStats, Occurrence, Redemption, Reward, Task, User } from '../types'
 
 export const parent: User = { id: 1, email: 'mom@example.com', username: 'mom', full_name: 'Mom Rivera', role: 'parent', created_at: '2026-01-01T00:00:00Z' }
 export const mia: User = { id: 2, email: 'mia@example.com', username: 'mia', full_name: 'Mia', role: 'child', created_at: '2026-01-02T00:00:00Z' }
@@ -11,6 +11,7 @@ export const assignment = (childId: number, extra: Partial<Assignment> = {}): As
   completed: false,
   assigned_at: '2026-01-01T00:00:00Z',
   is_active: true,
+  awaiting_approval: false,
   ...extra,
 })
 
@@ -19,6 +20,7 @@ export const occurrence = (id: number, date: string, extra: Partial<Occurrence> 
   task_id: 1,
   occurrence_date: date,
   status: 'pending',
+  awaiting_approval: false,
   ...extra,
 })
 
@@ -30,6 +32,7 @@ export const task = (extra: Partial<Task> = {}): Task => ({
   priority: 'High',
   task_type: 'adhoc',
   status: 'pending',
+  requires_approval: false,
   created_by: parent.id,
   created_at: '2026-01-01T00:00:00Z',
   assignments: [assignment(mia.id)],
@@ -60,3 +63,29 @@ export const rotatingTask = (extra: Partial<Task> = {}): Task =>
     assignments: [assignment(mia.id, { rotation_order: 0 }), assignment(leo.id, { rotation_order: 1, is_active: false })],
     ...extra,
   })
+
+export const reward = (extra: Partial<Reward> = {}): Reward => ({ id: 1, name: 'Pizza night', emoji: '🍕', cost: 10, active: true, ...extra })
+
+export const redemption = (extra: Partial<Redemption> = {}): Redemption => ({
+  id: 1,
+  reward_id: 1,
+  reward_name: 'Pizza night',
+  reward_emoji: '🍕',
+  child_id: mia.id,
+  child_name: 'Mia',
+  cost: 10,
+  status: 'requested',
+  created_at: '2026-01-05T10:00:00Z',
+  fulfilled_at: null,
+  ...extra,
+})
+
+export const childStats = (extra: Partial<ChildStats> = {}): ChildStats => ({
+  stars: 0,
+  spent: 0,
+  balance: 0,
+  completed_count: 0,
+  streak_days: 0,
+  badges: [],
+  ...extra,
+})
