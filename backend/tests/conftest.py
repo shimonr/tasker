@@ -30,7 +30,7 @@ database.Base.metadata.create_all(bind=engine)
 def fresh_state(monkeypatch):
     monkeypatch.setattr(database, "engine", engine)
     monkeypatch.setattr(database, "SessionLocal", TestingSessionLocal)
-    for name in ("BREVO_API_KEY", "BREVO_SMTP_LOGIN", "EMAIL_SENDER_ADDRESS", "EMAIL_OVERRIDE_RECIPIENT", "ADMIN_PASSWORD", "TASKER_SECRET_KEY", "APP_BASE_URL", "REMINDER_TOKEN"):
+    for name in ("BREVO_API_KEY", "BREVO_SMTP_LOGIN", "EMAIL_SENDER_ADDRESS", "EMAIL_OVERRIDE_RECIPIENT", "ADMIN_PASSWORD", "TASKER_SECRET_KEY", "APP_BASE_URL", "REMINDER_TOKEN", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY"):
         monkeypatch.delenv(name, raising=False)
     auth.login_limiter.clear()
     auth.password_reset_limiter.clear()

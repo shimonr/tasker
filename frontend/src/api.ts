@@ -10,6 +10,8 @@ import type {
   Occurrence,
   ParentStats,
   ProfileUpdate,
+  PushConfig,
+  PushSubscriptionInput,
   Redemption,
   Reward,
   RewardInput,
@@ -137,5 +139,9 @@ export const completeOccurrence = (occurrenceId: number) => data<Occurrence>(api
 export const fetchChildRewards = () => data<Reward[]>(api.get('/child/rewards'))
 export const redeemReward = (rewardId: number) => data<Redemption>(api.post(`/child/rewards/${rewardId}/redeem`))
 export const fetchChildRedemptions = () => data<Redemption[]>(api.get('/child/redemptions'))
+
+export const fetchPushConfig = () => data<PushConfig>(api.get('/push/config'))
+export const subscribePush = (subscription: PushSubscriptionInput) => data<Message>(api.post('/me/push-subscriptions', subscription))
+export const unsubscribePush = (endpoint: string) => data<Message>(api.delete('/me/push-subscriptions', { data: { endpoint } }))
 
 export default api

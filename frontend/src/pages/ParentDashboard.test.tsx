@@ -13,6 +13,7 @@ import {
   fetchChildren,
   fetchFamily,
   fetchParentTasks,
+  fetchPushConfig,
   fetchRedemptions,
   fetchRewards,
   fetchStats,
@@ -43,6 +44,9 @@ vi.mock('../api', () => ({
   fetchChildren: vi.fn(),
   fetchFamily: vi.fn(),
   fetchParentTasks: vi.fn(),
+  fetchPushConfig: vi.fn(),
+  subscribePush: vi.fn(),
+  unsubscribePush: vi.fn(),
   fetchRedemptions: vi.fn(),
   fetchRewards: vi.fn(),
   fetchStats: vi.fn(),
@@ -92,6 +96,7 @@ describe('ParentDashboard', () => {
     vi.mocked(fetchRewards).mockResolvedValue([reward()])
     vi.mocked(fetchRedemptions).mockResolvedValue([])
     vi.mocked(fetchWeek).mockResolvedValue(week())
+    vi.mocked(fetchPushConfig).mockResolvedValue({ public_key: null })
     for (const fn of [
       advanceTask,
       approveOccurrence,

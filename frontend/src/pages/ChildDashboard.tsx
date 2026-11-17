@@ -15,6 +15,7 @@ import BadgeGrid from '../components/BadgeGrid'
 import Confetti from '../components/Confetti'
 import Modal from '../components/Modal'
 import Navbar from '../components/Navbar'
+import NotificationToggle from '../components/NotificationToggle'
 import ProfileEditor from '../components/ProfileEditor'
 import RedemptionList from '../components/RedemptionList'
 import RewardShop from '../components/RewardShop'
@@ -49,7 +50,7 @@ export default function ChildDashboard({ user, onLogout, onUserChange }: ChildDa
   const [loaded, setLoaded] = useState(false)
   const [celebrations, setCelebrations] = useState(0)
   const [editingProfile, setEditingProfile] = useState(false)
-  const { toast, attempt } = useToast()
+  const { toast, attempt, notify } = useToast()
 
   const load = useCallback(async () => {
     const [nextTasks, nextStats, nextRewards, nextRedemptions] = await Promise.all([
@@ -145,6 +146,8 @@ export default function ChildDashboard({ user, onLogout, onUserChange }: ChildDa
           </div>
         )}
       </section>
+
+      <NotificationToggle onNotify={notify} />
 
       {loaded && (
         <TaskSections

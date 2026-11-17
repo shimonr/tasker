@@ -77,7 +77,29 @@ links use `https://shimonr.com/tasker`, and the `APP_DOMAIN` name redirects ther
 - Backups: `/opt/tasker/backups/prod-*.sql.gz` (nightly, 14 days). Manual: `bash /opt/tasker/src/prod/deploy/oracle/backup.sh prod`.
 - Restore a backup: `gunzip -c <file> | docker exec -i tasker-prod-db-1 psql -U tasker -d tasker`.
 
-## Off-site backups (Oracle Object Storage)
+## Push notifications
+
+Phone and browser notifications need a VAPID key pair in `/opt/tasker/<env>.env` (prod and qa). Generate it once on any
+machine with the backend's dependencies installed (`pip install pywebpush`), then add both lines to both env files:
+
+```python
+import base64
+from cryptography.hazmat.primitives import serialization
+from py_vapid import Vapid
+
+v = Vapid()
+v.generate_keys()
+b64 = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")
+print("VAPID_PUBLIC_KEY=" + b64(v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)))
+print("VAPID_PRIVATE_KEY=" + b64(v.private_key.private_numbers().private_value.to_bytes(32, "big")))
+```
+
+Keep the private key secret. Changing it makes every device re-enable notifications. Users open the app and tap
+*Turn on notifications*. On iPhone the app must first be added to the Home Screen.
+
+## Later phase: off-site backups (suggestion)
+
+Not in use yet. Copying the nightly dumps to Oracle Object Storage is a suggestion for a later phase.
 
 `offsite-backup.sh` copies the newest nightly dump to a bucket and keeps 14 days there. It runs at 03:30 UTC
 once `/opt/tasker/offsite.env` exists (the file holds rclone settings for the `oci` remote; see the script header).

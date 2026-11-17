@@ -116,7 +116,7 @@ def test_legacy_admin_is_migrated(db, client, monkeypatch):
 def test_health_and_security_headers(client, monkeypatch):
     monkeypatch.setenv("APP_ENV", "qa")
     response = client.get("/api/health")
-    assert response.json() == {"status": "ok", "version": "0.5.1", "environment": "qa"}
+    assert response.json() == {"status": "ok", "version": "0.5.2", "environment": "qa"}
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
 

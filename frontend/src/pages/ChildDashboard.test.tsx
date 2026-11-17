@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { completeOccurrence, completeTask, fetchChildRedemptions, fetchChildRewards, fetchChildStats, fetchChildTasks, redeemReward, updateProfile, updateTaskStatus } from '../api'
+import { completeOccurrence, completeTask, fetchChildRedemptions, fetchChildRewards, fetchChildStats, fetchChildTasks, fetchPushConfig, redeemReward, updateProfile, updateTaskStatus } from '../api'
 import ChildDashboard from './ChildDashboard'
 import { assignment, childStats, mia, occurrence, recurringTask, redemption, reward, task } from '../test/fixtures'
 
@@ -14,6 +14,9 @@ vi.mock('../api', () => ({
   updateTaskStatus: vi.fn(),
   redeemReward: vi.fn(),
   updateProfile: vi.fn(),
+  fetchPushConfig: vi.fn(),
+  subscribePush: vi.fn(),
+  unsubscribePush: vi.fn(),
 }))
 
 const done = task({ id: 7, title: 'Done chore', assignments: [assignment(mia.id, { completed: true })] })
@@ -33,6 +36,7 @@ describe('ChildDashboard', () => {
     vi.mocked(updateTaskStatus).mockResolvedValue({})
     vi.mocked(redeemReward).mockResolvedValue(redemption())
     vi.mocked(updateProfile).mockResolvedValue({ ...mia, full_name: 'Mia Star', avatar: '🦄', color: '#123456' })
+    vi.mocked(fetchPushConfig).mockResolvedValue({ public_key: null })
   })
 
   it('greets the kid with their balance, stats and open tasks first', async () => {

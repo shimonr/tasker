@@ -38,6 +38,8 @@ services:
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       BREVO_SMTP_LOGIN: ${BREVO_SMTP_LOGIN:-}
       EMAIL_SENDER_ADDRESS: ${EMAIL_SENDER_ADDRESS:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-Family Task Adventure}
       EMAIL_OVERRIDE_RECIPIENT: ${EMAIL_OVERRIDE_RECIPIENT:-}
       # Shared secret for the reminder cron job (POST /api/internal/reminders).

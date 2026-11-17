@@ -3,7 +3,7 @@
 A cheerful family chore app: parents create tasks, kids complete them and collect stars ⭐, admins manage the family.
 React + TypeScript (Vite, Tailwind) frontend and a FastAPI + SQLAlchemy backend.
 
-- Release: **0.5**
+- Release: **0.5.2**
 
 ## Features
 
@@ -14,6 +14,8 @@ React + TypeScript (Vite, Tailwind) frontend and a FastAPI + SQLAlchemy backend.
 - **Admins** add, edit and remove family members and reset passwords.
 - **Email via Brevo**: welcome emails, self-service “Forgot password” links, “new task”/“your turn” emails
   for kids and “task finished” emails for parents.
+- **Phone notifications**: families can turn on Web Push (a browser or home-screen app) for new missions, finished missions,
+  approvals and reminders. Emails still go out too.
 - **Mobile first**: responsive layouts, big touch targets, bottom-sheet dialogs, installable as an app (PWA manifest).
 - **Security**: hashed passwords only (no plaintext copies), sessions revoked on password change, login and
   reset rate limits, strict security headers, role and ownership checks on every endpoint.
@@ -72,6 +74,7 @@ cd frontend && npm test         # Vitest, fails below 100% coverage
 | `BREVO_SMTP_LOGIN` | Only for SMTP keys: the SMTP login from Brevo (*SMTP & API → SMTP*). Defaults to `EMAIL_SENDER_ADDRESS`. |
 | `EMAIL_SENDER_ADDRESS`, `EMAIL_SENDER_NAME` | Sender; the address must be a verified sender in Brevo. |
 | `EMAIL_OVERRIDE_RECIPIENT` | Send every email to this address instead (use on QA). |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push keys. Without both, push notifications are off. Generate them once (see [deploy/oracle/README.md](deploy/oracle/README.md#push-notifications)). |
 
 Frontend build variable: `VITE_API_BASE_URL` – API base URL when the API is on another domain.
 Defaults to same-origin `/api`.
@@ -80,8 +83,7 @@ Defaults to same-origin `/api`.
 ## Deployment
 
 Oracle Cloud (prod + qa): pushes to `master` deploy prod and pushes to `qa` deploy QA, after all tests pass.
-One-time setup: [deploy/oracle/README.md](deploy/oracle/README.md). The old Railway + Vercel deployment is retired;
-`frontend/vercel.json` only turns off Vercel's automatic Git deployments.
+One-time setup: [deploy/oracle/README.md](deploy/oracle/README.md).
 
 ## API overview
 

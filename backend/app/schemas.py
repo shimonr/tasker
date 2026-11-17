@@ -349,3 +349,21 @@ class ParentStats(BaseModel):
     in_progress_tasks: int
     failed_tasks: int
     children: List[ChildLeaderboardEntry]
+
+
+class PushConfig(BaseModel):
+    public_key: str | None
+
+
+class PushKeys(BaseModel):
+    p256dh: str = Field(min_length=1, max_length=200)
+    auth: str = Field(min_length=1, max_length=200)
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2048)
+    keys: PushKeys
+
+
+class PushEndpoint(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2048)

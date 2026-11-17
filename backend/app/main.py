@@ -13,7 +13,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import __version__, auth, crud, database, deps, mailer, models, schemas
+from . import __version__, auth, crud, database, deps, mailer, models, push, schemas
 from .timeutil import utcnow
 
 logger = logging.getLogger("tasker")
@@ -146,16 +146,22 @@ def notify_assigned(background: BackgroundTasks, db: Session, child_ids, task: m
     for child_id in child_ids:
         child = crud.get_user(db, child_id)
         background.add_task(mailer.send_task_assigned, child.email, child.full_name, task.title, crud.display_name(parent), your_turn)
+        if your_turn:
+            background.add_task(push.notify, child.id, "It's your turn! 🔄", task.title, "/child")
+        else:
+            background.add_task(push.notify, child.id, "New mission! 🎯", f"{crud.display_name(parent)} gave you: {task.title}", "/child")
 
 
 def notify_completed(background: BackgroundTasks, task: models.Task, child: models.User) -> None:
     parent = task.creator
     background.add_task(mailer.send_task_completed, parent.email, parent.full_name, task.title, crud.display_name(child))
+    background.add_task(push.notify, parent.id, "Mission done! 🎉", f"{crud.display_name(child)} finished {task.title}", "/parent")
 
 
 def notify_approval_requested(background: BackgroundTasks, task: models.Task, child: models.User) -> None:
     parent = task.creator
     background.add_task(mailer.send_approval_request, parent.email, parent.full_name, crud.display_name(child), task.title)
+    background.add_task(push.notify, parent.id, "Approval needed 👀", f"{crud.display_name(child)} finished {task.title}", "/parent")
 
 
 def validate_task(db: Session, task_type: str, recurrence, assignee_ids: list[int], family_id: int) -> None:
@@ -682,14 +688,45 @@ def send_reminders(x_reminder_token: str | None = Header(None), db: Session = De
         crud.sync_occurrences(task)
     db.commit()
     sent = 0
+    reminders = []  # (child_id, task title) for every reminder that went out
     for assignment in crud.due_soon_assignments(db, now):
         if mailer.send_reminder(assignment.child.email, assignment.child.full_name, assignment.task.title):
             assignment.reminded_at = now
             sent += 1
+            reminders.append((assignment.child_id, assignment.task.title))
     for occurrence in crud.open_occurrences(db, now):
         results = [mailer.send_reminder(a.child.email, a.child.full_name, occurrence.task.title) for a in occurrence.task.assignments]
         sent += sum(results)
+        reminders += [(a.child_id, occurrence.task.title) for a, ok in zip(occurrence.task.assignments, results) if ok]
         if any(results):
             occurrence.reminded_at = now
     db.commit()
+    for child_id, title in reminders:
+        push.notify(child_id, "Reminder ⏰", title, "/child")
     return {"message": f"Sent {sent} reminders"}
+
+
+# ---------------------------------------------------------------- push notifications
+
+
+@app.get("/api/push/config", response_model=schemas.PushConfig)
+def push_config(_: models.User = Depends(deps.get_current_user)):
+    return {"public_key": push.public_key()}
+
+
+@app.post("/api/me/push-subscriptions", response_model=schemas.Message)
+def subscribe_to_push(body: schemas.PushSubscriptionIn, user: models.User = Depends(deps.get_current_user), db: Session = Depends(deps.get_db)):
+    sub = db.query(models.PushSubscription).filter(models.PushSubscription.endpoint == body.endpoint).first()
+    if not sub:
+        sub = models.PushSubscription(endpoint=body.endpoint)
+        db.add(sub)
+    sub.user_id, sub.p256dh, sub.auth = user.id, body.keys.p256dh, body.keys.auth
+    db.commit()
+    return {"message": "Notifications are on for this device."}
+
+
+@app.delete("/api/me/push-subscriptions", response_model=schemas.Message)
+def unsubscribe_from_push(body: schemas.PushEndpoint, user: models.User = Depends(deps.get_current_user), db: Session = Depends(deps.get_db)):
+    db.query(models.PushSubscription).filter(models.PushSubscription.endpoint == body.endpoint, models.PushSubscription.user_id == user.id).delete()
+    db.commit()
+    return {"message": "Notifications are off for this device."}

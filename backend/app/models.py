@@ -66,6 +66,7 @@ class User(Base):
     assignments = relationship("TaskAssignment", back_populates="child", cascade="all, delete-orphan")
     completion_events = relationship("CompletionEvent", back_populates="child", cascade="all, delete-orphan")
     redemptions = relationship("Redemption", back_populates="child", cascade="all, delete-orphan")
+    push_subscriptions = relationship("PushSubscription", cascade="all, delete-orphan")
 
     @property
     def family_name(self):
@@ -202,3 +203,16 @@ class AppSecret(Base):
 
     name = Column(String, primary_key=True)
     value = Column(String, nullable=False)
+
+
+class PushSubscription(Base):
+    """A browser or phone that asked for notifications. One row per push endpoint."""
+
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    endpoint = Column(String, unique=True, nullable=False)
+    p256dh = Column(String, nullable=False)
+    auth = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

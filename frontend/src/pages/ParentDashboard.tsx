@@ -27,6 +27,7 @@ import Approvals from '../components/Approvals'
 import FamilyPanel from '../components/FamilyPanel'
 import Modal from '../components/Modal'
 import Navbar from '../components/Navbar'
+import NotificationToggle from '../components/NotificationToggle'
 import RedemptionList from '../components/RedemptionList'
 import RewardsManager from '../components/RewardsManager'
 import TaskCard, { StatusPill } from '../components/TaskCard'
@@ -168,6 +169,7 @@ export default function ParentDashboard({ user, onLogout }: ParentDashboardProps
         </div>
       </section>
 
+      <NotificationToggle onNotify={notify} />
       <Approvals items={pendingApprovals(tasks, kids)} onDecide={decide} />
 
       <section className="mb-6 grid gap-6 lg:grid-cols-2">

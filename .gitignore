@@ -10,7 +10,6 @@ frontend/node_modules
 .env
 .venv
 tasker.db
-.vercel
 coverage
 htmlcov
 .coverage

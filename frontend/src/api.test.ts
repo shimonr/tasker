@@ -68,6 +68,9 @@ describe('api client', () => {
       [() => client.fetchChildRewards(), 'get', '/child/rewards'],
       [() => client.redeemReward(4), 'post', '/child/rewards/4/redeem'],
       [() => client.fetchChildRedemptions(), 'get', '/child/redemptions'],
+      [() => client.fetchPushConfig(), 'get', '/push/config'],
+      [() => client.subscribePush({ endpoint: 'https://push.example/1', keys: { p256dh: 'p', auth: 'a' } }), 'post', '/me/push-subscriptions', { endpoint: 'https://push.example/1', keys: { p256dh: 'p', auth: 'a' } }],
+      [() => client.unsubscribePush('https://push.example/1'), 'delete', '/me/push-subscriptions', { endpoint: 'https://push.example/1' }],
     ]
     for (const [call, method, url, body] of calls) {
       await expect(call()).resolves.toEqual({ ok: true })

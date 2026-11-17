@@ -227,3 +227,13 @@ export interface WeekView {
   start: string
   days: { date: string; items: WeekItem[] }[]
 }
+
+export interface PushConfig {
+  /** The server's VAPID public key, or null when push is not configured on this server. */
+  public_key: string | null
+}
+
+export interface PushSubscriptionInput {
+  endpoint: string
+  keys: { p256dh: string; auth: string }
+}
